@@ -12,19 +12,34 @@ class DatasetStatus(str, Enum):
 
 
 @dataclass(slots=True)
+class Rect:
+    x: int
+    y: int
+    w: int
+    h: int
+
+    @property
+    def area(self) -> int:
+        return self.w * self.h
+
+    def as_tuple(self) -> tuple[int, int, int, int]:
+        return self.x, self.y, self.w, self.h
+
+
+@dataclass(slots=True)
 class ImageRecord:
     source_file: Path
     auto_status: DatasetStatus = DatasetStatus.REVIEW
     final_status: DatasetStatus = DatasetStatus.REVIEW
     auto_reasons: list[str] = field(default_factory=list)
     user_override: bool = False
-    identity_similarity: float | None = None
-    quality_score: float | None = None
-    yaw: float | None = None
-    pitch: float | None = None
-    roll: float | None = None
+    face_box: Rect | None = None
+    crop_box: Rect | None = None
+    detected_faces_count: int = 0
     direction_caption: str = ""
     caption: str = ""
+    identity_similarity: float | None = None
+    is_reference: bool = False
 
     @property
     def display_name(self) -> str:
@@ -33,3 +48,13 @@ class ImageRecord:
     def set_final_status(self, status: DatasetStatus) -> None:
         self.final_status = status
         self.user_override = status != self.auto_status
+
+    def reset_user_override(self) -> None:
+        self.final_status = self.auto_status
+        self.user_override = False
+
+    def remove_reason_prefix(self, prefixes: tuple[str, ...]) -> None:
+        self.auto_reasons = [
+            reason for reason in self.auto_reasons
+            if not reason.startswith(prefixes)
+        ]
