@@ -91,3 +91,12 @@ LoRADatasetMaker PATCH NOTES
 - 자동 분석 시 YuNet/SFace 필수 모델을 미리 확인하여 기준 인물 지정 시 다운로드 대기 최소화
 - 모델 출처와 Apache 2.0 라이선스 정보를 models/README.md에 기록
 - 패키지 버전 0.0.8
+
+0009 - Git LFS model download hotfix
+- YuNet/SFace 자동 다운로드 URL을 raw.githubusercontent.com 단일 경로에서 Git LFS 실제 바이너리 경로 우선 방식으로 변경
+- media.githubusercontent.com 경로를 1순위로 사용하고 GitHub raw 경로를 fallback으로 추가
+- Git LFS pointer 파일을 실제 ONNX 모델로 오인하지 않도록 감지 로직 추가
+- SHA256 검증 실패 시 다른 다운로드 경로로 자동 재시도
+- 오류 메시지에 검증 실패 유형을 표시하도록 개선
+- 손상/잘못 다운로드된 .onnx/.part 파일은 다음 시도 전에 자동 정리
+- 패키지 버전 0.0.9
