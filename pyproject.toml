@@ -1,0 +1,15 @@
+[project]
+name = "loradatasetmaker"
+version = "0.0.1"
+description = "Local LoRA identity dataset preprocessing and review tool for Windows"
+requires-python = ">=3.11"
+
+[project.scripts]
+loradatasetmaker = "loradatasetmaker.app:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

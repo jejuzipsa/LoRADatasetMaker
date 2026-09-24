@@ -1,0 +1,11 @@
+LoRADatasetMaker PATCH NOTES
+
+0001 - Project scaffold
+- 프로젝트 목적과 1차 범위 정의
+- 자동 판정은 삭제가 아닌 추천 상태로 설계
+- ACCEPTED / REVIEW / REJECTED 3상태 정의
+- 제외/보류 이미지도 프리뷰 및 결과에 전부 보존
+- 사용자 override 및 판정 로그 설계
+- 얼굴 검출 / 동일인물 / 품질 / 중복 / Head Pose / Crop / Caption / Export 파이프라인 정의
+- 기본 Head Crop 1024x1024 방향 설정
+- Qwen/WAN LoRA Trainer는 후속 단계로 분리
