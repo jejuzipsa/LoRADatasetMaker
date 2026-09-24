@@ -10,10 +10,8 @@ from loradatasetmaker.ui.main_window import MainWindow
 def main() -> None:
     app = QApplication(sys.argv)
     app.setApplicationName("LoRA Dataset Maker")
-
     window = MainWindow()
     window.show()
-
     raise SystemExit(app.exec())
 
 
