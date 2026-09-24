@@ -1,0 +1,61 @@
+name: Build LoRADatasetMaker
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    name: Windows test and EXE build
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
+
+      - name: Install project
+        run: pip install -e .
+
+      - name: Compile Python sources
+        run: python -m compileall -q src
+
+      - name: Smoke import core modules
+        shell: pwsh
+        run: |
+          python -c "from loradatasetmaker.core.analyzer import FaceAnalyzer; from loradatasetmaker.core.identity import IdentityMatcher; from loradatasetmaker.core.exporter import DatasetExporter; print('core import OK')"
+
+      - name: Install PyInstaller
+        run: pip install pyinstaller
+
+      - name: Build Windows EXE
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --clean --windowed --name LoRADatasetMaker --paths src src/loradatasetmaker/app.py
+
+      - name: Package artifact
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist/LoRADatasetMaker/* -DestinationPath LoRADatasetMaker-windows.zip -Force
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LoRADatasetMaker-windows
+          path: LoRADatasetMaker-windows.zip
+          if-no-files-found: error
+          retention-days: 5
