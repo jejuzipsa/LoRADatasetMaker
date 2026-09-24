@@ -78,3 +78,16 @@ LoRADatasetMaker PATCH NOTES
 - decisions.json에 detection_confidence 기록
 - YuNet 5-point landmark 기반 기초 좌/우 방향 태그 계산
 - 패키지 버전 0.0.7
+
+0008 - SFace identity embedding
+- 기존 gray + HSV 임시 descriptor 동일인물 판정을 SFace 얼굴 임베딩으로 교체
+- OpenCV Zoo face_recognition_sface_2021dec.onnx 자동 다운로드 및 SHA256 검증 추가
+- YuNet 5-point landmark로 얼굴 정렬 후 SFace feature 추출
+- OpenCV Zoo 기준 cosine threshold 0.363을 REVIEW 하한으로 적용
+- cosine 0.45 이상은 동일인물 강한 후보, 0.363~0.45는 REVIEW, 0.363 미만은 REJECTED
+- 여러 얼굴이 있는 이미지에서는 기준 인물과 SFace similarity가 가장 높은 얼굴을 선택
+- 선택된 얼굴 기준으로 face box / Head Crop을 다시 맞춤
+- 동일인물 판정을 QThread 백그라운드 작업으로 전환하고 진행률 표시
+- 자동 분석 시 YuNet/SFace 필수 모델을 미리 확인하여 기준 인물 지정 시 다운로드 대기 최소화
+- 모델 출처와 Apache 2.0 라이선스 정보를 models/README.md에 기록
+- 패키지 버전 0.0.8

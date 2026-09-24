@@ -30,6 +30,7 @@ from loradatasetmaker.core.indexer import (
     index_image_folder,
 )
 from loradatasetmaker.ui.analysis_worker import AnalysisWorker
+from loradatasetmaker.ui.identity_worker import IdentityWorker
 
 
 ROLE_RECORD_INDEX = Qt.ItemDataRole.UserRole
@@ -45,6 +46,8 @@ class MainWindow(QMainWindow):
 
         self.analysis_thread: QThread | None = None
         self.analysis_worker: AnalysisWorker | None = None
+        self.identity_thread: QThread | None = None
+        self.identity_worker: IdentityWorker | None = None
 
         self.setWindowTitle("LoRA Dataset Maker")
         self.resize(1500, 920)
@@ -226,7 +229,7 @@ class MainWindow(QMainWindow):
         )
 
     def _choose_folder(self) -> None:
-        if self.analysis_thread is not None:
+        if self._is_busy():
             return
 
         selected = QFileDialog.getExistingDirectory(self, "사진 폴더 선택")
@@ -246,7 +249,7 @@ class MainWindow(QMainWindow):
         self._populate_list()
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802
-        if self.analysis_thread is not None:
+        if self._is_busy():
             event.ignore()
             return
         if event.mimeData().hasUrls():
@@ -255,7 +258,7 @@ class MainWindow(QMainWindow):
             event.ignore()
 
     def dropEvent(self, event: QDropEvent) -> None:  # noqa: N802
-        if self.analysis_thread is not None:
+        if self._is_busy():
             event.ignore()
             return
 
@@ -322,7 +325,7 @@ class MainWindow(QMainWindow):
         self._refresh_counts()
 
     def _run_analysis(self) -> None:
-        if not self.records or self.analysis_thread is not None:
+        if not self.records or self._is_busy():
             return
 
         self.reference_identity = None
@@ -390,6 +393,12 @@ class MainWindow(QMainWindow):
         self.analysis_thread = None
         self.analysis_worker = None
 
+    def _is_busy(self) -> bool:
+        return (
+            self.analysis_thread is not None
+            or self.identity_thread is not None
+        )
+
     def _set_analysis_busy(self, busy: bool) -> None:
         self.folder_button.setEnabled(not busy)
         self.analyze_button.setEnabled(not busy and bool(self.records))
@@ -408,6 +417,8 @@ class MainWindow(QMainWindow):
         )
 
     def _set_reference(self) -> None:
+        if self._is_busy():
+            return
         record = self._current_record()
         if record is None or record.face_box is None:
             QMessageBox.warning(
@@ -429,18 +440,71 @@ class MainWindow(QMainWindow):
         self.reference_identity = reference
         self.reference_label.setText(f"기준 인물: {record.display_name}")
         self.classify_button.setEnabled(True)
+        self.analysis_status_label.setText(
+            "기준 인물 준비 완료 / SFace 임베딩 사용"
+        )
 
     def _classify_identity(self) -> None:
-        if self.reference_identity is None:
+        if self.reference_identity is None or self._is_busy():
             return
 
-        self.identity_matcher.classify_records(
+        self.analysis_progress.setRange(0, len(self.records))
+        self.analysis_progress.setValue(0)
+        self.analysis_status_label.setText(
+            f"SFace 동일인물 판정 준비 중... 0 / {len(self.records)}"
+        )
+        self._set_analysis_busy(True)
+
+        self.identity_thread = QThread(self)
+        self.identity_worker = IdentityWorker(
             self.records,
             self.reference_identity,
         )
+        self.identity_worker.moveToThread(self.identity_thread)
+
+        self.identity_thread.started.connect(self.identity_worker.run)
+        self.identity_worker.progress.connect(self._on_identity_progress)
+        self.identity_worker.finished.connect(self._on_identity_finished)
+        self.identity_worker.failed.connect(self._on_identity_failed)
+
+        self.identity_worker.finished.connect(self.identity_thread.quit)
+        self.identity_worker.failed.connect(self.identity_thread.quit)
+        self.identity_worker.finished.connect(self.identity_worker.deleteLater)
+        self.identity_worker.failed.connect(self.identity_worker.deleteLater)
+
+        self.identity_thread.finished.connect(self._on_identity_thread_finished)
+        self.identity_thread.finished.connect(self.identity_thread.deleteLater)
+        self.identity_thread.start()
+
+    def _on_identity_progress(self, current: int, total: int) -> None:
+        self.analysis_progress.setRange(0, max(1, total))
+        self.analysis_progress.setValue(current)
+        self.analysis_status_label.setText(
+            f"SFace 동일인물 판정 중... {current} / {total}"
+        )
+
+    def _on_identity_finished(self) -> None:
         self._populate_list()
         self._refresh_counts()
         self._sync_export_button()
+        self.analysis_progress.setValue(len(self.records))
+        self.analysis_status_label.setText(
+            f"SFace 동일인물 판정 완료 / {len(self.records)}장"
+        )
+        self._set_analysis_busy(False)
+
+    def _on_identity_failed(self, message: str) -> None:
+        self.analysis_status_label.setText("동일인물 판정 실패")
+        self._set_analysis_busy(False)
+        QMessageBox.critical(
+            self,
+            "동일인물 판정 실패",
+            "SFace 동일인물 판정 중 오류가 발생했어.\n\n" + message,
+        )
+
+    def _on_identity_thread_finished(self) -> None:
+        self.identity_thread = None
+        self.identity_worker = None
 
     def _export_dataset(self) -> None:
         if not self.records:
@@ -578,7 +642,7 @@ class MainWindow(QMainWindow):
         )
         self.caption_edit.setText(record.caption)
 
-        if self.analysis_thread is None:
+        if not self._is_busy():
             self.reference_button.setEnabled(record.face_box is not None)
 
     def _set_preview(
@@ -708,7 +772,7 @@ class MainWindow(QMainWindow):
 
     def _sync_export_button(self) -> None:
         self.export_button.setEnabled(
-            self.analysis_thread is None
+            not self._is_busy()
             and any(
                 record.final_status is DatasetStatus.ACCEPTED
                 for record in self.records

@@ -10,6 +10,7 @@ Windows용 로컬 LoRA 학습 데이터셋 전처리/검수 도구.
 - 0005: GitHub Actions CI / Windows 빌드 artifact
 - 0006: 백그라운드 자동 분석 + 진행률 + 드래그앤드롭
 - 0007: YuNet 얼굴 검출 + 모델 자동 다운로드 + 검출 박스 표시
+- 0008: SFace 얼굴 임베딩 + 동일인물 판정
 
 ## 1차 목표
 사진을 대량 투입하면 자동으로 동일 인물 후보를 분류하고, Head/Portrait 학습용 크롭·품질 검사·중복 판정·얼굴 방향 분석·캡션 생성을 수행한 뒤, 사용자가 모든 채택/제외/보류 결과를 프리뷰에서 최종 검수하여 LoRA 학습용 데이터셋으로 Export한다.
@@ -24,7 +25,8 @@ Windows용 로컬 LoRA 학습 데이터셋 전처리/검수 도구.
 - 원본 프리뷰 얼굴 검출 박스 / confidence 표시
 - Head Crop 생성
 - 기준 인물 지정
-- 기본 동일인물 유사도 재분류
+- SFace 얼굴 임베딩 기반 동일인물 유사도 재분류
+- 여러 얼굴이 있는 사진에서는 기준 인물과 가장 비슷한 얼굴 선택
 - ACCEPTED / REVIEW / REJECTED 수동 조정
 - caption 수동 수정
 - accepted 결과 1024 PNG + TXT Export
@@ -33,7 +35,6 @@ Windows용 로컬 LoRA 학습 데이터셋 전처리/검수 도구.
 - Windows EXE 자동 빌드 artifact
 
 ## 아직 미구현
-- 전용 face embedding 모델 기반 고정밀 동일인물 판정
 - 고급 품질 검사
 - 중복/유사 프레임 제거
 - 정교한 head pose

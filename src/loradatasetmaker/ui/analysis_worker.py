@@ -4,6 +4,7 @@ from PySide6.QtCore import QObject, Signal, Slot
 
 from loradatasetmaker.core.analyzer import FaceAnalyzer
 from loradatasetmaker.core.domain import ImageRecord
+from loradatasetmaker.core.model_manager import ensure_sface_model
 
 
 class AnalysisWorker(QObject):
@@ -20,9 +21,10 @@ class AnalysisWorker(QObject):
     @Slot()
     def run(self) -> None:
         try:
-            self.status.emit("YuNet 얼굴 검출 모델 확인 중...")
+            self.status.emit("얼굴 AI 모델 확인 중...")
             analyzer = FaceAnalyzer()
             analyzer.prepare()
+            ensure_sface_model()
 
             total = len(self.records)
             self.status.emit(f"자동 분석 시작 / {total}장")
