@@ -5,6 +5,7 @@ from PySide6.QtCore import QObject, Signal, Slot
 from loradatasetmaker.core.analyzer import FaceAnalyzer
 from loradatasetmaker.core.domain import ImageRecord
 from loradatasetmaker.core.model_manager import ensure_sface_model
+from loradatasetmaker.core.quality import QualityAnalyzer
 
 
 class AnalysisWorker(QObject):
@@ -26,13 +27,17 @@ class AnalysisWorker(QObject):
             analyzer.prepare()
             ensure_sface_model()
 
+            quality = QualityAnalyzer()
+
             total = len(self.records)
             self.status.emit(f"자동 분석 시작 / {total}장")
 
             for index, record in enumerate(self.records, start=1):
                 record.is_reference = False
                 record.identity_similarity = None
+                record.clear_vision_review()
                 analyzer.analyze(record, trigger_token=self.trigger_token)
+                quality.analyze(record)
                 self.progress.emit(index, total)
 
             self.finished.emit()

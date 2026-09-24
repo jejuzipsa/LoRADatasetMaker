@@ -128,9 +128,8 @@ class IdentityMatcher:
 
         if not faces:
             record.identity_similarity = None
-            record.auto_status = DatasetStatus.REJECTED
+            record.apply_auto_status(DatasetStatus.REJECTED)
             record.auto_reasons.append("identity_face_not_detected")
-            record.reset_user_override()
             return
 
         best_face: np.ndarray | None = None
@@ -154,9 +153,8 @@ class IdentityMatcher:
 
         if best_face is None:
             record.identity_similarity = None
-            record.auto_status = DatasetStatus.REVIEW
+            record.apply_auto_status(DatasetStatus.REVIEW)
             record.auto_reasons.append("identity_uncertain:no_feature")
-            record.reset_user_override()
             return
 
         record.identity_similarity = best_similarity
@@ -179,29 +177,25 @@ class IdentityMatcher:
             return
 
         if best_similarity < self.review_threshold:
-            record.auto_status = DatasetStatus.REJECTED
+            record.apply_auto_status(DatasetStatus.REJECTED)
             record.auto_reasons.append(
                 f"not_same_person:{best_similarity:.3f}"
             )
-            record.reset_user_override()
             return
 
         if best_similarity < self.same_threshold:
-            record.auto_status = DatasetStatus.REVIEW
+            record.apply_auto_status(DatasetStatus.REVIEW)
             record.auto_reasons.append(
                 f"identity_uncertain:{best_similarity:.3f}"
             )
-            record.reset_user_override()
             return
 
         if len(faces) > 1:
             if "multiple_faces_detected" not in record.auto_reasons:
                 record.auto_reasons.append("multiple_faces_detected")
-            record.auto_status = DatasetStatus.REVIEW
+            record.apply_auto_status(DatasetStatus.REVIEW)
         else:
-            record.auto_status = DatasetStatus.ACCEPTED
-
-        record.reset_user_override()
+            record.apply_auto_status(DatasetStatus.ACCEPTED)
 
     def _detect_faces(self, image: np.ndarray) -> list[np.ndarray]:
         assert self.detector is not None

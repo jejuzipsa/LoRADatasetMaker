@@ -100,3 +100,25 @@ LoRADatasetMaker PATCH NOTES
 - 오류 메시지에 검증 실패 유형을 표시하도록 개선
 - 손상/잘못 다운로드된 .onnx/.part 파일은 다음 시도 전에 자동 정리
 - 패키지 버전 0.0.9
+
+0010 - Quality scoring / optional Vision review / expanded export
+- 빠른 규칙 기반 품질 검사 QualityAnalyzer 추가
+- 얼굴 ROI를 256x256으로 정규화한 Laplacian variance 기반 blur_score 추가
+- face_pixel_size / face_size_ratio / exposure_mean / crop_touches_edge 기록
+- detector confidence를 포함한 0~100 quality_score 계산
+- 작은 얼굴 / 심한 블러 / 극단 노출은 REJECTED 추천, 경계/중간 품질은 REVIEW 추천
+- 동일인물 재분류 후에도 품질 판정을 다시 적용하도록 통합
+- 사용자 수동 상태 override가 자동 재분류에서 임의로 사라지지 않도록 auto/final 상태 적용 로직 개선
+- 로컬 Ollama Vision 2차 검수 모듈 추가
+- UI에 Vision URL / Model / Vision 검수 버튼 / 후보 수 표시 추가
+- Vision에는 검출 박스가 표시된 원본과 Head Crop 두 이미지를 함께 전달
+- Vision 응답은 usable / hair visible / occlusion / blur / crop quality / notes의 strict JSON으로 처리
+- Vision 검수는 REVIEW / 낮은 품질점수 / crop edge / 다중 얼굴 등 애매한 후보만 우선 처리
+- Vision 자동 판정은 기존 판정을 상향시키지 않고 REVIEW/REJECTED 방향으로만 보강
+- Vision 오류는 항목별 메모에 남기고 배치 전체는 계속 진행
+- 상세 패널에 quality_score / blur / face pixel / crop edge / Vision 결과 표시
+- Export를 accepted / review / rejected / logs 구조로 확장
+- review / rejected는 원본 파일을 보존해서 출력
+- logs/decisions.json 외 quality_scores.json / vision_reviews.json / dataset_summary.json 추가
+- 분석/재분류 시 이전 Vision 결과는 crop 변경 가능성을 고려해 자동 초기화
+- 패키지 버전 0.0.10

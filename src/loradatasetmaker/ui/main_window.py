@@ -31,6 +31,7 @@ from loradatasetmaker.core.indexer import (
 )
 from loradatasetmaker.ui.analysis_worker import AnalysisWorker
 from loradatasetmaker.ui.identity_worker import IdentityWorker
+from loradatasetmaker.ui.vision_worker import VisionWorker
 
 
 ROLE_RECORD_INDEX = Qt.ItemDataRole.UserRole
@@ -48,6 +49,8 @@ class MainWindow(QMainWindow):
         self.analysis_worker: AnalysisWorker | None = None
         self.identity_thread: QThread | None = None
         self.identity_worker: IdentityWorker | None = None
+        self.vision_thread: QThread | None = None
+        self.vision_worker: VisionWorker | None = None
 
         self.setWindowTitle("LoRA Dataset Maker")
         self.resize(1500, 920)
@@ -120,6 +123,36 @@ class MainWindow(QMainWindow):
         self.analysis_progress.setTextVisible(True)
         analysis_row.addWidget(self.analysis_progress, 1)
         layout.addLayout(analysis_row)
+
+        vision_row = QHBoxLayout()
+        vision_row.addWidget(QLabel("Vision URL"))
+
+        self.vision_url_edit = QLineEdit(
+            "http://127.0.0.1:11434/api/chat"
+        )
+        self.vision_url_edit.setMaximumWidth(360)
+        vision_row.addWidget(self.vision_url_edit)
+
+        vision_row.addWidget(QLabel("Model"))
+        self.vision_model_edit = QLineEdit()
+        self.vision_model_edit.setPlaceholderText(
+            "Ollama vision model name"
+        )
+        self.vision_model_edit.setMaximumWidth(220)
+        self.vision_model_edit.textChanged.connect(
+            self._sync_vision_button
+        )
+        vision_row.addWidget(self.vision_model_edit)
+
+        self.vision_button = QPushButton("Vision 검수")
+        self.vision_button.setEnabled(False)
+        self.vision_button.clicked.connect(self._run_vision_review)
+        vision_row.addWidget(self.vision_button)
+
+        self.vision_target_label = QLabel("대상 0")
+        vision_row.addWidget(self.vision_target_label)
+        vision_row.addStretch(1)
+        layout.addLayout(vision_row)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         layout.addWidget(splitter, 1)
@@ -323,6 +356,7 @@ class MainWindow(QMainWindow):
         self.analysis_progress.setRange(0, max(1, len(self.records)))
         self.analysis_progress.setValue(0)
         self._refresh_counts()
+        self._sync_vision_button()
 
     def _run_analysis(self) -> None:
         if not self.records or self._is_busy():
@@ -379,6 +413,7 @@ class MainWindow(QMainWindow):
             f"분석 완료 / {len(self.records)}장"
         )
         self._set_analysis_busy(False)
+        self._sync_vision_button()
 
     def _on_analysis_failed(self, message: str) -> None:
         self.analysis_status_label.setText("분석 실패")
@@ -392,15 +427,19 @@ class MainWindow(QMainWindow):
     def _on_analysis_thread_finished(self) -> None:
         self.analysis_thread = None
         self.analysis_worker = None
+        self._sync_vision_button()
 
     def _is_busy(self) -> bool:
         return (
             self.analysis_thread is not None
             or self.identity_thread is not None
+            or self.vision_thread is not None
         )
 
     def _set_analysis_busy(self, busy: bool) -> None:
         self.folder_button.setEnabled(not busy)
+        self.vision_url_edit.setEnabled(not busy)
+        self.vision_model_edit.setEnabled(not busy)
         self.analyze_button.setEnabled(not busy and bool(self.records))
         self.reference_button.setEnabled(
             not busy and any(record.face_box is not None for record in self.records)
@@ -415,6 +454,10 @@ class MainWindow(QMainWindow):
                 for record in self.records
             )
         )
+        if not busy:
+            self._sync_vision_button()
+        else:
+            self.vision_button.setEnabled(False)
 
     def _set_reference(self) -> None:
         if self._is_busy():
@@ -492,6 +535,7 @@ class MainWindow(QMainWindow):
             f"SFace 동일인물 판정 완료 / {len(self.records)}장"
         )
         self._set_analysis_busy(False)
+        self._sync_vision_button()
 
     def _on_identity_failed(self, message: str) -> None:
         self.analysis_status_label.setText("동일인물 판정 실패")
@@ -505,6 +549,137 @@ class MainWindow(QMainWindow):
     def _on_identity_thread_finished(self) -> None:
         self.identity_thread = None
         self.identity_worker = None
+        self._sync_vision_button()
+
+    def _vision_candidates(self) -> list[ImageRecord]:
+        candidates: list[ImageRecord] = []
+        for record in self.records:
+            if record.crop_box is None:
+                continue
+            if record.auto_status is DatasetStatus.REJECTED:
+                continue
+
+            quality = record.quality_score
+            if (
+                record.auto_status is DatasetStatus.REVIEW
+                or quality is None
+                or quality < 88
+                or record.crop_touches_edge
+                or record.detected_faces_count > 1
+            ):
+                candidates.append(record)
+
+        return candidates
+
+    def _sync_vision_button(self) -> None:
+        if not hasattr(self, "vision_button"):
+            return
+
+        candidates = self._vision_candidates()
+        self.vision_target_label.setText(f"대상 {len(candidates)}")
+        self.vision_button.setEnabled(
+            not self._is_busy()
+            and bool(candidates)
+            and bool(self.vision_model_edit.text().strip())
+        )
+
+    def _run_vision_review(self) -> None:
+        if self._is_busy():
+            return
+
+        model = self.vision_model_edit.text().strip()
+        if not model:
+            QMessageBox.warning(
+                self,
+                "Vision 모델 필요",
+                "Ollama에서 사용할 Vision 모델 이름을 입력해줘.",
+            )
+            return
+
+        candidates = self._vision_candidates()
+        if not candidates:
+            QMessageBox.information(
+                self,
+                "Vision 검수",
+                "현재 Vision 2차 검수가 필요한 후보가 없어.",
+            )
+            return
+
+        self.analysis_progress.setRange(0, len(candidates))
+        self.analysis_progress.setValue(0)
+        self.analysis_status_label.setText(
+            f"Vision 검수 준비 중... 0 / {len(candidates)}"
+        )
+        self._set_analysis_busy(True)
+
+        self.vision_thread = QThread(self)
+        self.vision_worker = VisionWorker(
+            candidates,
+            self.vision_url_edit.text().strip(),
+            model,
+        )
+        self.vision_worker.moveToThread(self.vision_thread)
+
+        self.vision_thread.started.connect(self.vision_worker.run)
+        self.vision_worker.progress.connect(self._on_vision_progress)
+        self.vision_worker.finished.connect(self._on_vision_finished)
+        self.vision_worker.failed.connect(self._on_vision_failed)
+
+        self.vision_worker.finished.connect(self.vision_thread.quit)
+        self.vision_worker.failed.connect(self.vision_thread.quit)
+        self.vision_worker.finished.connect(self.vision_worker.deleteLater)
+        self.vision_worker.failed.connect(self.vision_worker.deleteLater)
+
+        self.vision_thread.finished.connect(
+            self._on_vision_thread_finished
+        )
+        self.vision_thread.finished.connect(
+            self.vision_thread.deleteLater
+        )
+        self.vision_thread.start()
+
+    def _on_vision_progress(self, current: int, total: int) -> None:
+        self.analysis_progress.setRange(0, max(1, total))
+        self.analysis_progress.setValue(current)
+        self.analysis_status_label.setText(
+            f"Vision 검수 중... {current} / {total}"
+        )
+
+    def _on_vision_finished(self, reviewed: int, errors: int) -> None:
+        self._populate_list()
+        self._refresh_counts()
+        self._sync_export_button()
+        self.analysis_progress.setValue(
+            self.analysis_progress.maximum()
+        )
+        self.analysis_status_label.setText(
+            f"Vision 검수 완료 / 성공 {reviewed} / 오류 {errors}"
+        )
+        self._set_analysis_busy(False)
+        self._sync_vision_button()
+
+        if errors:
+            QMessageBox.warning(
+                self,
+                "Vision 검수 일부 실패",
+                f"{errors}개 항목에서 Vision 응답 오류가 발생했어. "
+                "각 항목의 Vision 메모에서 오류를 확인할 수 있어.",
+            )
+
+    def _on_vision_failed(self, message: str) -> None:
+        self.analysis_status_label.setText("Vision 검수 실패")
+        self._set_analysis_busy(False)
+        self._sync_vision_button()
+        QMessageBox.critical(
+            self,
+            "Vision 검수 실패",
+            "Vision 검수 중 오류가 발생했어.\n\n" + message,
+        )
+
+    def _on_vision_thread_finished(self) -> None:
+        self.vision_thread = None
+        self.vision_worker = None
+        self._sync_vision_button()
 
     def _export_dataset(self) -> None:
         if not self.records:
@@ -523,7 +698,7 @@ class MainWindow(QMainWindow):
         QMessageBox.information(
             self,
             "Export 완료",
-            "accepted 폴더와 logs/decisions.json을 만들었어.",
+            "accepted / review / rejected / logs 폴더로 내보냈어.",
         )
 
     def _populate_list(self) -> None:
@@ -627,6 +802,26 @@ class MainWindow(QMainWindow):
             if record.detection_confidence is not None
             else "-"
         )
+        quality = (
+            f"{record.quality_score:.1f}"
+            if record.quality_score is not None
+            else "-"
+        )
+        blur = (
+            f"{record.blur_score:.1f}"
+            if record.blur_score is not None
+            else "-"
+        )
+        face_px = (
+            str(record.face_pixel_size)
+            if record.face_pixel_size is not None
+            else "-"
+        )
+        vision_status = (
+            record.vision_status.value
+            if record.vision_status is not None
+            else "-"
+        )
 
         self.file_label.setText(str(record.source_file))
         self.meta_label.setText(
@@ -637,6 +832,15 @@ class MainWindow(QMainWindow):
             f"얼굴 신뢰도: {confidence}\n"
             f"방향: {record.direction_caption or '-'}\n"
             f"유사도: {similarity}\n"
+            f"품질 점수: {quality}\n"
+            f"블러 점수: {blur}\n"
+            f"얼굴 픽셀: {face_px}\n"
+            f"크롭 경계 접촉: {'예' if record.crop_touches_edge else '아니오'}\n"
+            f"Vision 상태: {vision_status}\n"
+            f"Vision 적합성: {record.vision_usable_for_lora or '-'}\n"
+            f"Vision 가림: {record.vision_occlusion or '-'}\n"
+            f"Vision 크롭: {record.vision_crop_quality or '-'}\n"
+            f"Vision 메모: {record.vision_notes or '-'}\n"
             f"기준 인물: {'예' if record.is_reference else '아니오'}\n"
             f"사용자 수정: {'예' if record.user_override else '아니오'}"
         )
@@ -746,6 +950,7 @@ class MainWindow(QMainWindow):
         self._show_current_item(item, None)
         self._refresh_counts()
         self._sync_export_button()
+        self._sync_vision_button()
 
     def _save_caption(self) -> None:
         record = self._current_record()

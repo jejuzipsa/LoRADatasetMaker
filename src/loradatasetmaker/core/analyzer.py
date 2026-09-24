@@ -43,8 +43,7 @@ class FaceAnalyzer:
             cv2.IMREAD_COLOR,
         )
         if image is None:
-            record.auto_status = DatasetStatus.REJECTED
-            record.final_status = DatasetStatus.REJECTED
+            record.apply_auto_status(DatasetStatus.REJECTED)
             record.auto_reasons = ["image_load_failed"]
             record.detection_confidence = None
             return record
@@ -63,8 +62,7 @@ class FaceAnalyzer:
 
         if faces is None or len(faces) == 0:
             record.detected_faces_count = 0
-            record.auto_status = DatasetStatus.REJECTED
-            record.final_status = DatasetStatus.REJECTED
+            record.apply_auto_status(DatasetStatus.REJECTED)
             record.auto_reasons.append("face_not_detected")
             return record
 
@@ -76,8 +74,7 @@ class FaceAnalyzer:
 
         if not candidates:
             record.detected_faces_count = 0
-            record.auto_status = DatasetStatus.REJECTED
-            record.final_status = DatasetStatus.REJECTED
+            record.apply_auto_status(DatasetStatus.REJECTED)
             record.auto_reasons.append("face_not_detected")
             return record
 
@@ -98,11 +95,9 @@ class FaceAnalyzer:
 
         if len(candidates) > 1:
             record.auto_reasons.append("multiple_faces_detected")
-            record.auto_status = DatasetStatus.REVIEW
-            record.final_status = DatasetStatus.REVIEW
+            record.apply_auto_status(DatasetStatus.REVIEW)
         else:
-            record.auto_status = DatasetStatus.ACCEPTED
-            record.final_status = DatasetStatus.ACCEPTED
+            record.apply_auto_status(DatasetStatus.ACCEPTED)
 
         pieces = [trigger_token.strip()] if trigger_token.strip() else []
         pieces.extend(["person", record.direction_caption])
