@@ -4,8 +4,8 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QIcon, QImage, QPixmap
+from PySide6.QtCore import QSize, QThread, Qt
+from PySide6.QtGui import QDragEnterEvent, QDropEvent, QIcon, QImage, QPixmap
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -15,17 +15,21 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QSplitter,
     QVBoxLayout,
     QWidget,
 )
 
-from loradatasetmaker.core.analyzer import FaceAnalyzer
 from loradatasetmaker.core.domain import DatasetStatus, ImageRecord
 from loradatasetmaker.core.exporter import DatasetExporter
 from loradatasetmaker.core.identity import IdentityMatcher, ReferenceIdentity
-from loradatasetmaker.core.indexer import index_image_folder
+from loradatasetmaker.core.indexer import (
+    SUPPORTED_EXTENSIONS,
+    index_image_folder,
+)
+from loradatasetmaker.ui.analysis_worker import AnalysisWorker
 
 
 ROLE_RECORD_INDEX = Qt.ItemDataRole.UserRole
@@ -36,13 +40,16 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.records: list[ImageRecord] = []
         self.reference_identity: ReferenceIdentity | None = None
-        self.analyzer = FaceAnalyzer()
         self.identity_matcher = IdentityMatcher()
         self.exporter = DatasetExporter()
+
+        self.analysis_thread: QThread | None = None
+        self.analysis_worker: AnalysisWorker | None = None
 
         self.setWindowTitle("LoRA Dataset Maker")
         self.resize(1500, 920)
         self.setMinimumSize(1180, 760)
+        self.setAcceptDrops(True)
 
         self._build_ui()
         self._apply_dark_theme()
@@ -60,7 +67,7 @@ class MainWindow(QMainWindow):
         self.folder_button.clicked.connect(self._choose_folder)
         controls.addWidget(self.folder_button)
 
-        self.folder_label = QLabel("선택된 폴더 없음")
+        self.folder_label = QLabel("선택된 폴더 없음 / 폴더나 이미지를 드래그앤드롭해도 돼")
         self.folder_label.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
@@ -99,6 +106,17 @@ class MainWindow(QMainWindow):
 
         self.count_label = QLabel()
         layout.addWidget(self.count_label)
+
+        analysis_row = QHBoxLayout()
+        self.analysis_status_label = QLabel("대기")
+        analysis_row.addWidget(self.analysis_status_label)
+
+        self.analysis_progress = QProgressBar()
+        self.analysis_progress.setRange(0, 100)
+        self.analysis_progress.setValue(0)
+        self.analysis_progress.setTextVisible(True)
+        analysis_row.addWidget(self.analysis_progress, 1)
+        layout.addLayout(analysis_row)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         layout.addWidget(splitter, 1)
@@ -184,6 +202,17 @@ class MainWindow(QMainWindow):
                 border-radius: 4px;
                 padding: 6px;
             }
+            QProgressBar {
+                background: #202329;
+                border: 1px solid #444a52;
+                border-radius: 4px;
+                text-align: center;
+                min-height: 18px;
+            }
+            QProgressBar::chunk {
+                background: #48515d;
+                border-radius: 3px;
+            }
             QListWidget {
                 background: #111317;
                 border: 1px solid #30343a;
@@ -197,37 +226,143 @@ class MainWindow(QMainWindow):
         )
 
     def _choose_folder(self) -> None:
+        if self.analysis_thread is not None:
+            return
+
         selected = QFileDialog.getExistingDirectory(self, "사진 폴더 선택")
         if not selected:
             return
 
         folder = Path(selected)
         try:
-            self.records = index_image_folder(folder)
+            records = index_image_folder(folder)
         except OSError as exc:
             QMessageBox.critical(self, "폴더 읽기 실패", str(exc))
             return
 
+        self.records = records
+        self.folder_label.setText(str(folder))
+        self._reset_after_source_change()
+        self._populate_list()
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802
+        if self.analysis_thread is not None:
+            event.ignore()
+            return
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event: QDropEvent) -> None:  # noqa: N802
+        if self.analysis_thread is not None:
+            event.ignore()
+            return
+
+        dropped_paths = [
+            Path(url.toLocalFile())
+            for url in event.mimeData().urls()
+            if url.isLocalFile()
+        ]
+        added = self._add_dropped_paths(dropped_paths)
+        if added:
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def _add_dropped_paths(self, paths: list[Path]) -> int:
+        candidates: list[ImageRecord] = []
+
+        for path in paths:
+            try:
+                if path.is_dir():
+                    candidates.extend(index_image_folder(path))
+                elif (
+                    path.is_file()
+                    and path.suffix.lower() in SUPPORTED_EXTENSIONS
+                ):
+                    candidates.append(ImageRecord(source_file=path))
+            except OSError:
+                continue
+
+        existing = {
+            str(record.source_file.resolve()).lower()
+            for record in self.records
+        }
+        unique: list[ImageRecord] = []
+        for record in candidates:
+            key = str(record.source_file.resolve()).lower()
+            if key in existing:
+                continue
+            existing.add(key)
+            unique.append(record)
+
+        if not unique:
+            return 0
+
+        self.records.extend(unique)
+        self.records.sort(key=lambda record: str(record.source_file).lower())
+        self.folder_label.setText(
+            f"드래그앤드롭으로 {len(unique)}개 추가 / 전체 {len(self.records)}개"
+        )
+        self._reset_after_source_change()
+        self._populate_list()
+        return len(unique)
+
+    def _reset_after_source_change(self) -> None:
         self.reference_identity = None
         self.reference_label.setText("기준 인물: 미지정")
-        self.folder_label.setText(str(folder))
         self.analyze_button.setEnabled(bool(self.records))
         self.reference_button.setEnabled(False)
         self.classify_button.setEnabled(False)
         self.export_button.setEnabled(False)
-        self._populate_list()
+        self.analysis_status_label.setText("미분석")
+        self.analysis_progress.setRange(0, max(1, len(self.records)))
+        self.analysis_progress.setValue(0)
         self._refresh_counts()
 
     def _run_analysis(self) -> None:
-        trigger = self.trigger_edit.text().strip()
+        if not self.records or self.analysis_thread is not None:
+            return
+
         self.reference_identity = None
         self.reference_label.setText("기준 인물: 미지정")
+        self.analysis_progress.setRange(0, len(self.records))
+        self.analysis_progress.setValue(0)
+        self.analysis_status_label.setText(
+            f"자동 분석 준비 중... 0 / {len(self.records)}"
+        )
+        self._set_analysis_busy(True)
 
-        for record in self.records:
-            record.is_reference = False
-            record.identity_similarity = None
-            self.analyzer.analyze(record, trigger_token=trigger)
+        self.analysis_thread = QThread(self)
+        self.analysis_worker = AnalysisWorker(
+            self.records,
+            self.trigger_edit.text().strip(),
+        )
+        self.analysis_worker.moveToThread(self.analysis_thread)
 
+        self.analysis_thread.started.connect(self.analysis_worker.run)
+        self.analysis_worker.progress.connect(self._on_analysis_progress)
+        self.analysis_worker.finished.connect(self._on_analysis_finished)
+        self.analysis_worker.failed.connect(self._on_analysis_failed)
+
+        self.analysis_worker.finished.connect(self.analysis_thread.quit)
+        self.analysis_worker.failed.connect(self.analysis_thread.quit)
+        self.analysis_worker.finished.connect(self.analysis_worker.deleteLater)
+        self.analysis_worker.failed.connect(self.analysis_worker.deleteLater)
+
+        self.analysis_thread.finished.connect(self._on_analysis_thread_finished)
+        self.analysis_thread.finished.connect(self.analysis_thread.deleteLater)
+        self.analysis_thread.start()
+
+    def _on_analysis_progress(self, current: int, total: int) -> None:
+        self.analysis_progress.setRange(0, max(1, total))
+        self.analysis_progress.setValue(current)
+        self.analysis_status_label.setText(
+            f"자동 분석 중... {current} / {total}"
+        )
+
+    def _on_analysis_finished(self) -> None:
         self._populate_list()
         self._refresh_counts()
         self.reference_button.setEnabled(
@@ -235,11 +370,40 @@ class MainWindow(QMainWindow):
         )
         self.classify_button.setEnabled(False)
         self._sync_export_button()
-        QMessageBox.information(
+        self.analysis_progress.setValue(len(self.records))
+        self.analysis_status_label.setText(
+            f"분석 완료 / {len(self.records)}장"
+        )
+        self._set_analysis_busy(False)
+
+    def _on_analysis_failed(self, message: str) -> None:
+        self.analysis_status_label.setText("분석 실패")
+        self._set_analysis_busy(False)
+        QMessageBox.critical(
             self,
-            "분석 완료",
-            "얼굴 검출과 기본 Head Crop 분석을 끝냈어. "
-            "이제 기준 인물을 지정하면 돼.",
+            "자동 분석 실패",
+            "자동 분석 중 오류가 발생했어.\n\n" + message,
+        )
+
+    def _on_analysis_thread_finished(self) -> None:
+        self.analysis_thread = None
+        self.analysis_worker = None
+
+    def _set_analysis_busy(self, busy: bool) -> None:
+        self.folder_button.setEnabled(not busy)
+        self.analyze_button.setEnabled(not busy and bool(self.records))
+        self.reference_button.setEnabled(
+            not busy and any(record.face_box is not None for record in self.records)
+        )
+        self.classify_button.setEnabled(
+            not busy and self.reference_identity is not None
+        )
+        self.export_button.setEnabled(
+            not busy
+            and any(
+                record.final_status is DatasetStatus.ACCEPTED
+                for record in self.records
+            )
         )
 
     def _set_reference(self) -> None:
@@ -287,7 +451,7 @@ class MainWindow(QMainWindow):
 
         try:
             self.exporter.export(Path(selected), self.records)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(self, "Export 실패", str(exc))
             return
 
@@ -329,11 +493,20 @@ class MainWindow(QMainWindow):
             if record.identity_similarity is not None
             else ""
         )
-        reasons = (
-            ", ".join(record.auto_reasons)
-            if record.auto_reasons
-            else "ok"
-        )
+
+        if (
+            record.face_box is None
+            and not record.auto_reasons
+            and not record.caption
+        ):
+            reasons = "미분석"
+        else:
+            reasons = (
+                ", ".join(record.auto_reasons)
+                if record.auto_reasons
+                else "ok"
+            )
+
         return (
             f"{ref}[{record.final_status.value}]\n"
             f"{record.display_name}{similarity}\n{reasons}"
@@ -397,7 +570,9 @@ class MainWindow(QMainWindow):
             f"사용자 수정: {'예' if record.user_override else '아니오'}"
         )
         self.caption_edit.setText(record.caption)
-        self.reference_button.setEnabled(record.face_box is not None)
+
+        if self.analysis_thread is None:
+            self.reference_button.setEnabled(record.face_box is not None)
 
     def _set_preview(
         self,
@@ -489,7 +664,8 @@ class MainWindow(QMainWindow):
 
     def _sync_export_button(self) -> None:
         self.export_button.setEnabled(
-            any(
+            self.analysis_thread is None
+            and any(
                 record.final_status is DatasetStatus.ACCEPTED
                 for record in self.records
             )
