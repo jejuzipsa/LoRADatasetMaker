@@ -18,5 +18,37 @@ LoRADatasetMaker PATCH NOTES
 - 자동 상태와 사용자 override를 분리 저장할 구조 구현
 - 썸네일 그리드, 원본 상세 프리뷰, Caption 수정 UI 추가
 - 전체/채택/보류/제외 카운트 표시
-- 얼굴 검출/동일인물/품질 AI 단계는 아직 연결하지 않고 분석 버튼 비활성화
 - 패키지 버전 0.0.2
+
+0003 - Face detect / head crop foundation
+- OpenCV Haar Cascade 기반 기본 얼굴 검출 추가
+- frontal/profile 조합으로 front, left_profile, right_profile 기초 방향 태그 추가
+- 가장 큰 얼굴을 기준으로 Head Crop 사각형 계산
+- 얼굴 미검출 이미지는 자동 REJECTED 처리 및 face_not_detected 사유 기록
+- 얼굴이 여러 개 검출되면 REVIEW 처리 및 multiple_faces_detected 사유 기록
+- Trigger token 기반 기본 caption 자동 생성
+- 원본 + 크롭 프리뷰 동시 표시
+- accepted 상태 이미지를 1024 PNG + TXT로 export 하는 기초 기능 추가
+- logs/decisions.json 감사 로그 출력 추가
+- 패키지 버전 0.0.3
+
+0004 - Reference identity selection / basic same-person filter
+- 현재 항목을 기준 인물로 지정하는 UI 추가
+- 기준 인물 descriptor 생성 및 저장 구조 추가
+- 얼굴 crop 기반 간단한 descriptor(gray + HSV hist) 비교 추가
+- 기준 인물 유사도(identity_similarity) 계산 및 상세 정보 표시
+- same / uncertain / different 3구간으로 ACCEPTED / REVIEW / REJECTED 자동 재분류 추가
+- not_same_person / identity_uncertain 사유 기록 추가
+- 기준 인물은 [REF] 표시 및 유사도 1.000으로 고정
+- accepted 결과 Export 및 identity 정보 decisions.json 기록
+- 패키지 버전 0.0.4
+
+0005 - GitHub Actions / Windows artifact
+- 0003/0004 구현을 GitHub main 브랜치에 동기화
+- .github/workflows/build.yml 추가
+- main push 및 workflow_dispatch에서 CI 실행
+- Python 3.11 패키지 설치 / compileall / import smoke test 추가
+- PyInstaller 기반 Windows EXE 빌드 추가
+- LoRADatasetMaker-windows artifact 업로드 추가
+- build/dist/cache/model/output 파일용 .gitignore 추가
+- 패키지 버전 0.0.5
