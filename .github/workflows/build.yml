@@ -58,4 +58,3 @@ jobs:
           name: LoRADatasetMaker-windows
           path: LoRADatasetMaker-windows.zip
           if-no-files-found: error
-          retention-days: 5
