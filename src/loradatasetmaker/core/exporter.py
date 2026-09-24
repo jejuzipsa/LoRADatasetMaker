@@ -68,6 +68,7 @@ class DatasetExporter:
                     "auto_reasons": record.auto_reasons,
                     "user_override": record.user_override,
                     "detected_faces_count": record.detected_faces_count,
+                    "detection_confidence": record.detection_confidence,
                     "direction_caption": record.direction_caption,
                     "caption": record.caption,
                     "identity_similarity": record.identity_similarity,

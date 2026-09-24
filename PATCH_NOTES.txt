@@ -66,3 +66,15 @@ LoRADatasetMaker PATCH NOTES
 - 기존 목록에 드롭 시 중복 경로 자동 제외 후 추가
 - PyInstaller 빌드에 OpenCV haarcascade 데이터 명시적 포함
 - 패키지 버전 0.0.6
+
+0007 - YuNet face detector / reliable crop
+- Haar Cascade 기반 얼굴 검출을 YuNet FaceDetectorYN으로 교체
+- 배경/문양 등을 얼굴로 오인해 엉뚱한 위치를 Head Crop하던 문제 개선
+- 첫 자동 분석 시 face_detection_yunet_2023mar.onnx를 app-local models 폴더에 자동 다운로드
+- YuNet 모델 SHA256 검증 및 손상 파일 자동 재다운로드
+- 이후 실행에서는 로컬 모델을 재사용하여 오프라인 분석 가능
+- confidence 0.90 기준 적용
+- 원본 프리뷰에 실제 검출 얼굴 박스와 confidence 표시
+- decisions.json에 detection_confidence 기록
+- YuNet 5-point landmark 기반 기초 좌/우 방향 태그 계산
+- 패키지 버전 0.0.7

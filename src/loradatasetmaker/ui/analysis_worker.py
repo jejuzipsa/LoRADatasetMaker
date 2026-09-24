@@ -8,6 +8,7 @@ from loradatasetmaker.core.domain import ImageRecord
 
 class AnalysisWorker(QObject):
     progress = Signal(int, int)
+    status = Signal(str)
     finished = Signal()
     failed = Signal(str)
 
@@ -19,13 +20,19 @@ class AnalysisWorker(QObject):
     @Slot()
     def run(self) -> None:
         try:
+            self.status.emit("YuNet 얼굴 검출 모델 확인 중...")
             analyzer = FaceAnalyzer()
+            analyzer.prepare()
+
             total = len(self.records)
+            self.status.emit(f"자동 분석 시작 / {total}장")
+
             for index, record in enumerate(self.records, start=1):
                 record.is_reference = False
                 record.identity_similarity = None
                 analyzer.analyze(record, trigger_token=self.trigger_token)
                 self.progress.emit(index, total)
+
             self.finished.emit()
         except Exception as exc:  # noqa: BLE001
             self.failed.emit(f"{type(exc).__name__}: {exc}")

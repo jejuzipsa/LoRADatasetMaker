@@ -343,6 +343,7 @@ class MainWindow(QMainWindow):
 
         self.analysis_thread.started.connect(self.analysis_worker.run)
         self.analysis_worker.progress.connect(self._on_analysis_progress)
+        self.analysis_worker.status.connect(self.analysis_status_label.setText)
         self.analysis_worker.finished.connect(self._on_analysis_finished)
         self.analysis_worker.failed.connect(self._on_analysis_failed)
 
@@ -538,7 +539,7 @@ class MainWindow(QMainWindow):
 
         self._set_preview(
             self.original_label,
-            self._pixmap_from_path(record.source_file),
+            self._original_pixmap(record),
             "원본",
         )
         self._set_preview(
@@ -557,6 +558,11 @@ class MainWindow(QMainWindow):
             if record.identity_similarity is not None
             else "-"
         )
+        confidence = (
+            f"{record.detection_confidence:.3f}"
+            if record.detection_confidence is not None
+            else "-"
+        )
 
         self.file_label.setText(str(record.source_file))
         self.meta_label.setText(
@@ -564,6 +570,7 @@ class MainWindow(QMainWindow):
             f"최종 상태: {record.final_status.value}\n"
             f"자동 사유: {reasons}\n"
             f"검출 얼굴 수: {record.detected_faces_count}\n"
+            f"얼굴 신뢰도: {confidence}\n"
             f"방향: {record.direction_caption or '-'}\n"
             f"유사도: {similarity}\n"
             f"기준 인물: {'예' if record.is_reference else '아니오'}\n"
@@ -595,9 +602,46 @@ class MainWindow(QMainWindow):
         )
 
     @staticmethod
-    def _pixmap_from_path(path: Path) -> QPixmap | None:
-        pixmap = QPixmap(str(path))
-        return None if pixmap.isNull() else pixmap
+    def _original_pixmap(record: ImageRecord) -> QPixmap | None:
+        image = cv2.imdecode(
+            np.fromfile(record.source_file, dtype=np.uint8),
+            cv2.IMREAD_COLOR,
+        )
+        if image is None:
+            return None
+
+        if record.face_box is not None:
+            x, y, w, h = record.face_box.as_tuple()
+            cv2.rectangle(
+                image,
+                (x, y),
+                (x + w, y + h),
+                (0, 255, 0),
+                max(2, int(round(max(image.shape[:2]) / 700))),
+            )
+
+            if record.detection_confidence is not None:
+                cv2.putText(
+                    image,
+                    f"{record.detection_confidence:.2f}",
+                    (x, max(20, y - 8)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    (0, 255, 0),
+                    2,
+                    cv2.LINE_AA,
+                )
+
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        height, width, channels = image.shape
+        qimage = QImage(
+            image.data,
+            width,
+            height,
+            channels * width,
+            QImage.Format.Format_RGB888,
+        )
+        return QPixmap.fromImage(qimage.copy())
 
     @staticmethod
     def _crop_pixmap(record: ImageRecord) -> QPixmap | None:

@@ -36,6 +36,7 @@ class ImageRecord:
     face_box: Rect | None = None
     crop_box: Rect | None = None
     detected_faces_count: int = 0
+    detection_confidence: float | None = None
     direction_caption: str = ""
     caption: str = ""
     identity_similarity: float | None = None
@@ -55,6 +56,7 @@ class ImageRecord:
 
     def remove_reason_prefix(self, prefixes: tuple[str, ...]) -> None:
         self.auto_reasons = [
-            reason for reason in self.auto_reasons
+            reason
+            for reason in self.auto_reasons
             if not reason.startswith(prefixes)
         ]
