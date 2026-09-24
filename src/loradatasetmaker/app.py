@@ -1,11 +1,20 @@
-"""LoRADatasetMaker application entry point placeholder.
+from __future__ import annotations
 
-Implementation starts after the v0.1 architecture/model selection is fixed.
-"""
+import sys
+
+from PySide6.QtWidgets import QApplication
+
+from loradatasetmaker.ui.main_window import MainWindow
 
 
 def main() -> None:
-    print("LoRADatasetMaker scaffold 0.0.1")
+    app = QApplication(sys.argv)
+    app.setApplicationName("LoRA Dataset Maker")
+
+    window = MainWindow()
+    window.show()
+
+    raise SystemExit(app.exec())
 
 
 if __name__ == "__main__":
