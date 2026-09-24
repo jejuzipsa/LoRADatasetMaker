@@ -9,7 +9,6 @@ SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 
 
 def index_image_folder(folder: Path, recursive: bool = True) -> list[ImageRecord]:
-    """Index supported image files without modifying the source folder."""
     iterator = folder.rglob("*") if recursive else folder.glob("*")
     files = sorted(
         path
