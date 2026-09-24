@@ -37,7 +37,7 @@ jobs:
       - name: Smoke import core modules
         shell: pwsh
         run: |
-          python -c "from loradatasetmaker.core.analyzer import FaceAnalyzer; from loradatasetmaker.core.identity import IdentityMatcher; from loradatasetmaker.core.exporter import DatasetExporter; print('core import OK')"
+          python -c "from loradatasetmaker.core.analyzer import FaceAnalyzer; FaceAnalyzer(); from loradatasetmaker.core.identity import IdentityMatcher; from loradatasetmaker.core.exporter import DatasetExporter; print('core import OK')"
 
       - name: Install PyInstaller
         run: pip install pyinstaller
@@ -45,7 +45,7 @@ jobs:
       - name: Build Windows EXE
         shell: pwsh
         run: |
-          pyinstaller --noconfirm --clean --windowed --name LoRADatasetMaker --paths src src/loradatasetmaker/app.py
+          pyinstaller --noconfirm --clean --windowed --name LoRADatasetMaker --paths src --collect-data cv2 src/loradatasetmaker/app.py
 
       - name: Package artifact
         shell: pwsh
