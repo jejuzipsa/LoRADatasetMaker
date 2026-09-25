@@ -13,6 +13,7 @@ Windows용 로컬 LoRA 학습 데이터셋 전처리/검수 도구.
 - 0008: SFace 얼굴 임베딩 + 동일인물 판정
 - 0009: Git LFS 모델 다운로드 핫픽스
 - 0010: 품질 점수 + 선택적 로컬 Vision 2차 검수 + 확장 Export
+- 0011: 상태별 색상 테두리 + 선택 항목 강조
 
 ## 1차 목표
 사진을 대량 투입하면 동일 인물 후보를 분류하고, Head/Portrait 학습용 크롭·품질 검사·Vision 검수·중복 판정·얼굴 방향 분석·캡션 생성을 수행한 뒤, 사용자가 모든 채택/제외/보류 결과를 최종 검수하여 LoRA 학습용 데이터셋으로 Export한다.
@@ -34,6 +35,7 @@ Windows용 로컬 LoRA 학습 데이터셋 전처리/검수 도구.
 - 로컬 Ollama Vision 모델을 이용한 선택적 2차 검수
 - Vision은 애매한 후보만 대상으로 원본+Head Crop을 함께 검토
 - ACCEPTED / REVIEW / REJECTED 수동 조정 및 사용자 override 보존
+- ACCEPTED 파랑 / REVIEW 노랑 / REJECTED 빨강 상태 테두리
 - caption 수동 수정
 - accepted 결과 1024 PNG + TXT Export
 - review / rejected 원본 보존 Export

@@ -5,7 +5,16 @@ from pathlib import Path
 import cv2
 import numpy as np
 from PySide6.QtCore import QSize, QThread, Qt
-from PySide6.QtGui import QDragEnterEvent, QDropEvent, QIcon, QImage, QPixmap
+from PySide6.QtGui import (
+    QColor,
+    QDragEnterEvent,
+    QDropEvent,
+    QIcon,
+    QImage,
+    QPainter,
+    QPen,
+    QPixmap,
+)
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -254,9 +263,14 @@ class MainWindow(QMainWindow):
                 border: 1px solid #30343a;
                 border-radius: 5px;
             }
+            QListWidget::item {
+                border: 2px solid transparent;
+                padding: 3px;
+            }
             QListWidget::item:selected {
                 background: #30353d;
-                border: 1px solid #626a75;
+                border: 2px solid #e7e9ec;
+                border-radius: 4px;
             }
             """
         )
@@ -709,22 +723,78 @@ class MainWindow(QMainWindow):
             item.setData(ROLE_RECORD_INDEX, index)
             item.setText(self._item_text(record))
 
-            pixmap = QPixmap(str(record.source_file))
-            if not pixmap.isNull():
-                item.setIcon(
-                    QIcon(
-                        pixmap.scaled(
-                            self.list_widget.iconSize(),
-                            Qt.AspectRatioMode.KeepAspectRatio,
-                            Qt.TransformationMode.SmoothTransformation,
-                        )
-                    )
-                )
+            icon = self._record_icon(record)
+            if icon is not None:
+                item.setIcon(icon)
 
             self.list_widget.addItem(item)
 
         if self.list_widget.count():
             self.list_widget.setCurrentRow(0)
+
+    @staticmethod
+    def _status_color(status: DatasetStatus) -> str:
+        if status is DatasetStatus.ACCEPTED:
+            return "#3b82f6"
+        if status is DatasetStatus.REVIEW:
+            return "#f59e0b"
+        return "#ef4444"
+
+    def _record_icon(self, record: ImageRecord) -> QIcon | None:
+        pixmap = QPixmap(str(record.source_file))
+        if pixmap.isNull():
+            return None
+
+        icon_size = self.list_widget.iconSize()
+        border_width = 5
+        inset = border_width + 3
+        image_size = QSize(
+            max(1, icon_size.width() - inset * 2),
+            max(1, icon_size.height() - inset * 2),
+        )
+        scaled = pixmap.scaled(
+            image_size,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+
+        canvas = QPixmap(icon_size)
+        canvas.fill(Qt.GlobalColor.transparent)
+
+        painter = QPainter(canvas)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        x = (icon_size.width() - scaled.width()) // 2
+        y = (icon_size.height() - scaled.height()) // 2
+        painter.drawPixmap(x, y, scaled)
+
+        pen = QPen(QColor(self._status_color(record.final_status)))
+        pen.setWidth(border_width)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(
+            border_width // 2,
+            border_width // 2,
+            icon_size.width() - border_width,
+            icon_size.height() - border_width,
+            7,
+            7,
+        )
+        painter.end()
+        return QIcon(canvas)
+
+    def _apply_preview_status_border(
+        self,
+        status: DatasetStatus,
+    ) -> None:
+        color = self._status_color(status)
+        style = (
+            f"border: 3px solid {color}; "
+            "border-radius: 5px; "
+            "background: #111317;"
+        )
+        self.original_label.setStyleSheet(style)
+        self.crop_label.setStyleSheet(style)
 
     def _item_text(self, record: ImageRecord) -> str:
         ref = "[REF] " if record.is_reference else ""
@@ -786,6 +856,7 @@ class MainWindow(QMainWindow):
             self._crop_pixmap(record),
             "크롭",
         )
+        self._apply_preview_status_border(record.final_status)
 
         reasons = (
             ", ".join(record.auto_reasons)
@@ -947,6 +1018,9 @@ class MainWindow(QMainWindow):
 
         record.set_final_status(status)
         item.setText(self._item_text(record))
+        icon = self._record_icon(record)
+        if icon is not None:
+            item.setIcon(icon)
         self._show_current_item(item, None)
         self._refresh_counts()
         self._sync_export_button()
