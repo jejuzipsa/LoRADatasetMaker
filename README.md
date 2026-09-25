@@ -16,6 +16,7 @@ Windows용 로컬 LoRA 학습 데이터셋 전처리/검수 도구.
 - 0011: 상태별 색상 테두리 + 선택 항목 강조
 - 0012: 자동 품질 판정 완화 + 불필요한 REVIEW 감소
 - 0013: Qwen Image Edit 2511 Training 준비/실행 섹션
+- 0014: Identity LoRA 기본 모드로 전환 / Control 요구 제거
 
 ## 1차 목표
 사진을 대량 투입하면 동일 인물 후보를 분류하고, Head/Portrait 학습용 크롭·품질 검사·Vision 검수·중복 판정·얼굴 방향 분석·캡션 생성을 수행한 뒤, 사용자가 모든 채택/제외/보류 결과를 최종 검수하여 LoRA 학습용 데이터셋으로 Export한다.
@@ -42,9 +43,9 @@ Windows용 로컬 LoRA 학습 데이터셋 전처리/검수 도구.
 - accepted 결과 1024 PNG + TXT Export
 - review / rejected 원본 보존 Export
 - decisions / quality_scores / vision_reviews / dataset_summary 로그
-- Qwen Image Edit 2511 / Musubi Tuner Training 탭
+- Musubi Tuner Identity LoRA Training 탭 (Control 불필요)
 - Trigger 자동 삽입 학습 workspace 생성
-- target-control pair 검증 + dataset.toml / cache / train BAT 생성
+- Qwen-Image base용 dataset.toml / cache / train BAT 생성
 - GitHub Actions 자동 검사
 - Windows EXE 자동 빌드 artifact
 
@@ -65,7 +66,7 @@ Vision 검수는 모든 이미지를 무조건 다시 처리하지 않는다. RE
 - 다양성 기반 20~40장 자동 선별
 - Vision provider 추가(OpenAI-compatible 등)
 - WAN Trainer 연동
-- Qwen Edit 2511 control/source pair 자동 생성 보조
+- Qwen Edit 2511 직접 Edit-LoRA 모드(control/source pair) 별도 추가
 - Training 로그/진행률을 앱 내부에 직접 스트리밍
 
 ## 로컬 실행
@@ -86,10 +87,12 @@ main 브랜치에 push하거나 Actions 탭에서 수동 실행하면:
 자세한 설계는 docs/SPEC.md, docs/PIPELINE.md 참고.
 
 
-## Qwen Image Edit 2511 Training
+## Identity LoRA Training
 
-Training 탭은 Musubi Tuner의 Qwen-Image-Edit-2511 LoRA 학습 흐름을 준비한다.
+Training 탭의 기본 모드는 accepted 이미지 + TXT만 사용하는 Control 없는 Identity LoRA 모드다.
 
-Qwen-Image-Edit-2511 학습 데이터는 target 이미지와 같은 stem을 가진 control/source 이미지 pair가 필요하다. accepted 폴더만 지정하면 Trigger가 삽입된 target workspace까지는 준비하지만, 모든 control pair와 Musubi/모델 경로가 준비되기 전에는 Train 버튼을 활성화하지 않는다.
+Musubi Tuner에서 Qwen-Image-Edit-2511의 직접 학습은 control/source 이미지를 사용하는 구조이므로, 0014의 Identity 모드는 `model_version=original`인 표준 Qwen-Image base 학습으로 분리했다. 따라서 DiT에는 `qwen_image_bf16.safetensors` 같은 Qwen-Image base 가중치를 지정해야 하며, Edit-2511 DiT를 잘못 지정하면 준비 단계에서 중단한다.
 
-학습 준비가 완료되면 workspace에 dataset.toml, training_manifest.json 및 scripts/01_cache_latents.bat, 02_cache_text.bat, 03_train.bat, run_all.bat을 생성한다.
+학습 준비 시 원본 accepted 폴더를 수정하지 않고 workspace로 복사하며 TXT 앞에 Trigger token을 자동 삽입한다. workspace에는 dataset.toml, training_manifest.json 및 scripts/01_cache_latents.bat, 02_cache_text.bat, 03_train.bat, run_all.bat을 생성한다.
+
+이 Identity LoRA를 Edit-2511에서 사용하는 부분은 직접 Edit-2511을 control 없이 학습한다는 의미가 아니며, 실제 ComfyUI 호환성/재현 결과는 생성 후 테스트 대상으로 둔다.

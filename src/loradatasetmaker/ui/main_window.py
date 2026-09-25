@@ -235,14 +235,15 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(18, 18, 18, 18)
         layout.setSpacing(12)
 
-        title = QLabel("Qwen Image Edit 2511 - LoRA Training")
+        title = QLabel("Identity LoRA Training - Control 없음")
         title.setStyleSheet("font-size: 17px; font-weight: 600;")
         layout.addWidget(title)
 
         note = QLabel(
-            "현재 0013은 Musubi Tuner 기반 학습 준비/실행 런처야. "
-            "Edit-2511 학습은 accepted target뿐 아니라 같은 파일명의 "
-            "control/source 이미지 pair가 필요해. 원본 데이터셋은 수정하지 않아."
+            "기본 Training은 accepted 얼굴 데이터셋만 쓰는 Identity LoRA 모드야. "
+            "Control/source 이미지는 필요 없어. Musubi의 표준 Qwen-Image "
+            "(model_version=original)로 학습하며, Edit-2511 직접 학습은 "
+            "control/source pair가 필요한 별도 방식이라 여기서는 사용하지 않아."
         )
         note.setWordWrap(True)
         layout.addWidget(note)
@@ -256,18 +257,6 @@ class MainWindow(QMainWindow):
             self._training_path_row(
                 "Accepted",
                 self.training_dataset_edit,
-                False,
-            )
-        )
-
-        self.training_control_edit = QLineEdit()
-        self.training_control_edit.setPlaceholderText(
-            "Qwen Edit source/control 폴더 (target과 파일명 stem 동일)"
-        )
-        data_layout.addLayout(
-            self._training_path_row(
-                "Control",
-                self.training_control_edit,
                 False,
             )
         )
@@ -288,7 +277,7 @@ class MainWindow(QMainWindow):
         self.training_trigger_edit.setPlaceholderText("예: personA")
         trigger_row.addWidget(self.training_trigger_edit, 1)
         trigger_row.addWidget(QLabel("Output name"))
-        self.training_output_name_edit = QLineEdit("identity_qwen2511")
+        self.training_output_name_edit = QLineEdit("identity_qwen")
         trigger_row.addWidget(self.training_output_name_edit, 1)
         data_layout.addLayout(trigger_row)
         layout.addWidget(data_group)
@@ -312,10 +301,14 @@ class MainWindow(QMainWindow):
 
         self.training_dit_edit = QLineEdit()
         self.training_dit_edit.setPlaceholderText(
-            "qwen_image_edit_2511_bf16.safetensors"
+            "qwen_image_bf16.safetensors"
         )
         engine_layout.addLayout(
-            self._training_path_row("DiT 2511", self.training_dit_edit, True)
+            self._training_path_row(
+                "Qwen-Image DiT",
+                self.training_dit_edit,
+                True,
+            )
         )
 
         self.training_vae_edit = QLineEdit()
@@ -386,8 +379,9 @@ class MainWindow(QMainWindow):
 
         memory_note = QLabel(
             "12GB VRAM에서는 block swap/fp8 절약 옵션이 필요할 수 있고 "
-            "시스템 RAM 사용량이 크게 늘 수 있어. 0013은 설정을 자동 생성하지만 "
-            "실제 첫 학습은 로그를 보면서 조정하는 전제로 잡았어."
+            "시스템 RAM 사용량이 크게 늘 수 있어. 이 모드는 Control 없는 "
+            "Qwen-Image Identity LoRA 학습이야. Edit-2511에서의 사용성은 "
+            "첫 LoRA 결과를 실제 ComfyUI에서 확인하면서 판단하면 돼."
         )
         memory_note.setWordWrap(True)
         layout.addWidget(memory_note)
@@ -464,10 +458,8 @@ class MainWindow(QMainWindow):
             )
             return
 
-        control_text = self.training_control_edit.text().strip()
         options = TrainingPrepOptions(
             dataset_dir=Path(dataset_text),
-            control_dir=Path(control_text) if control_text else None,
             workspace_dir=Path(workspace_text),
             musubi_dir=(
                 Path(self.training_musubi_edit.text().strip())
@@ -522,7 +514,7 @@ class MainWindow(QMainWindow):
             )
         else:
             self.training_status_label.setText(
-                f"Dataset 준비 완료 / {result.item_count}장 / pair 또는 경로 확인 필요"
+                f"Dataset 준비 완료 / {result.item_count}장 / 모델 경로 확인 필요"
             )
 
         if result.warnings:
@@ -1053,7 +1045,7 @@ class MainWindow(QMainWindow):
         self.training_dataset_edit.setText(str(accepted_dir))
         if not self.training_workspace_edit.text().strip():
             self.training_workspace_edit.setText(
-                str(export_root / "training_qwen2511")
+                str(export_root / "training_identity_qwen")
             )
         if not self.training_output_dir_edit.text().strip():
             self.training_output_dir_edit.setText(

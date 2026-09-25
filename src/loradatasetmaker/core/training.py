@@ -12,7 +12,6 @@ IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 @dataclass(slots=True)
 class TrainingPrepOptions:
     dataset_dir: Path
-    control_dir: Path | None
     workspace_dir: Path
     musubi_dir: Path | None
     python_exe: Path | None
@@ -41,12 +40,14 @@ class TrainingPrepResult:
 
 
 class TrainingPreparer:
-    """Prepare a Musubi Tuner Qwen-Image-Edit-2511 LoRA workspace.
+    """Prepare a no-control identity LoRA workspace with Musubi Tuner.
 
-    Qwen-Image-Edit training is pair-based: each target image needs a matching
-    control/source image.  The preparer never mutates the original accepted
-    dataset.  It copies targets/captions into a workspace and injects the
-    trigger token there.
+    This mode intentionally uses standard Qwen-Image training
+    (model_version=original). Qwen-Image-Edit-2511 direct training is not used
+    here because Musubi's Edit-2511 training path expects control/source images.
+
+    The accepted dataset is never modified. Images/captions are copied into a
+    workspace and the trigger token is injected only into those copies.
     """
 
     def prepare(self, options: TrainingPrepOptions) -> TrainingPrepResult:
@@ -71,14 +72,16 @@ class TrainingPreparer:
             raise ValueError("Rank/Epoch 값은 1 이상이어야 해.")
 
         images = sorted(
-            path for path in dataset_dir.iterdir()
+            path
+            for path in dataset_dir.iterdir()
             if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
         )
         if not images:
             raise ValueError("accepted 폴더에서 학습 이미지를 찾지 못했어.")
 
         missing_captions = [
-            image.name for image in images
+            image.name
+            for image in images
             if not image.with_suffix(".txt").is_file()
         ]
         if missing_captions:
@@ -88,20 +91,18 @@ class TrainingPreparer:
             )
 
         target_dir = workspace / "dataset" / "target"
-        control_out = workspace / "dataset" / "control"
         cache_dir = workspace / "cache"
         scripts_dir = workspace / "scripts"
         target_dir.mkdir(parents=True, exist_ok=True)
         cache_dir.mkdir(parents=True, exist_ok=True)
         scripts_dir.mkdir(parents=True, exist_ok=True)
 
-        # Rebuild only generated target files so stale captions/images do not
-        # leak into a later training run.
         self._clear_generated_files(target_dir)
         for image in images:
             shutil.copy2(image, target_dir / image.name)
             caption = image.with_suffix(".txt").read_text(
-                encoding="utf-8", errors="replace"
+                encoding="utf-8",
+                errors="replace",
             ).strip()
             normalized = self._with_trigger(caption, trigger)
             (target_dir / image.with_suffix(".txt").name).write_text(
@@ -109,49 +110,10 @@ class TrainingPreparer:
                 encoding="utf-8",
             )
 
-        warnings: list[str] = []
-        paired_count = 0
-        missing_controls: list[str] = []
-
-        if options.control_dir is None:
-            warnings.append(
-                "Qwen-Image-Edit-2511 학습에는 target과 짝이 되는 control/source "
-                "이미지가 필요해. Control 폴더를 지정해야 실제 Train이 활성화돼."
-            )
-        else:
-            control_dir = options.control_dir.resolve()
-            if not control_dir.is_dir():
-                warnings.append("Control 폴더가 존재하지 않아.")
-            else:
-                control_out.mkdir(parents=True, exist_ok=True)
-                self._clear_generated_files(control_out)
-                control_by_stem = {
-                    path.stem.lower(): path
-                    for path in control_dir.iterdir()
-                    if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
-                }
-                for image in images:
-                    control = control_by_stem.get(image.stem.lower())
-                    if control is None:
-                        missing_controls.append(image.name)
-                        continue
-                    # Musubi matches control images by filename stem, so keep
-                    # the target stem even when the source extension differs.
-                    dst = control_out / f"{image.stem}{control.suffix.lower()}"
-                    shutil.copy2(control, dst)
-                    paired_count += 1
-
-                if missing_controls:
-                    warnings.append(
-                        f"Control 짝이 없는 이미지가 {len(missing_controls)}개 있어. "
-                        "파일명 stem을 target과 맞춰줘."
-                    )
-
         config_path = workspace / "dataset.toml"
         config_path.write_text(
             self._dataset_toml(
                 target_dir=target_dir,
-                control_dir=control_out,
                 cache_dir=cache_dir,
                 resolution=options.resolution,
             ),
@@ -161,37 +123,42 @@ class TrainingPreparer:
         output_dir.mkdir(parents=True, exist_ok=True)
 
         missing_training_paths = self._missing_training_paths(options)
+        warnings: list[str] = []
         if missing_training_paths:
             warnings.append(
-                "실행 파일/모델 경로 미지정: " + ", ".join(missing_training_paths)
+                "실행 파일/모델 경로 미지정: "
+                + ", ".join(missing_training_paths)
             )
 
-        pair_ready = (
-            options.control_dir is not None
-            and paired_count == len(images)
-            and not missing_controls
-        )
-        ready = pair_ready and not missing_training_paths
+        if options.dit_path is not None:
+            dit_name = options.dit_path.name.lower()
+            if "edit" in dit_name:
+                raise ValueError(
+                    "Identity LoRA 모드는 Control 없는 표준 Qwen-Image 학습이야. "
+                    "qwen_image_edit_2511 계열 DiT가 아니라 "
+                    "qwen_image_bf16.safetensors 같은 Qwen-Image base DiT를 지정해줘."
+                )
+
+        ready = not missing_training_paths
 
         run_script: Path | None = None
-        preview = ""
+        preview = (
+            "Identity LoRA workspace 준비 완료.\n"
+            f"Dataset: {len(images)}장\n"
+            "Mode: Qwen-Image original / Control 없음\n"
+            "주의: Edit-2511 직접 학습은 Musubi 규격상 control/source가 필요해서 "
+            "이 모드에서는 사용하지 않아."
+        )
+
         if ready:
             scripts = self._write_scripts(options, config_path, scripts_dir)
             run_script = scripts["run_all"]
             preview = scripts["preview"]
-        else:
-            preview = (
-                "Training workspace 준비 완료.\n"
-                f"Target: {len(images)}장\n"
-                f"Control pair: {paired_count}/{len(images)}\n"
-                "Qwen-Image-Edit-2511은 source/control + target pair가 모두 있어야 "
-                "실제 LoRA 학습 명령을 만들 수 있어."
-            )
 
         manifest = {
-            "model_version": "edit-2511",
+            "training_mode": "identity_no_control",
+            "model_version": "original",
             "target_count": len(images),
-            "control_pair_count": paired_count,
             "trigger_token": trigger,
             "resolution": options.resolution,
             "rank": options.rank,
@@ -199,7 +166,11 @@ class TrainingPreparer:
             "learning_rate": options.learning_rate,
             "blocks_to_swap": options.blocks_to_swap,
             "ready_to_train": ready,
-            "missing_controls": missing_controls,
+            "note": (
+                "No-control identity LoRA is trained on standard Qwen-Image. "
+                "Direct Qwen-Image-Edit-2511 training is not used in this mode "
+                "because Edit-2511 expects control/source images."
+            ),
             "warnings": warnings,
         }
         (workspace / "training_manifest.json").write_text(
@@ -230,14 +201,14 @@ class TrainingPreparer:
     def _clear_generated_files(folder: Path) -> None:
         for path in folder.iterdir():
             if path.is_file() and (
-                path.suffix.lower() in IMAGE_EXTENSIONS or path.suffix.lower() == ".txt"
+                path.suffix.lower() in IMAGE_EXTENSIONS
+                or path.suffix.lower() == ".txt"
             ):
                 path.unlink()
 
     @staticmethod
     def _dataset_toml(
         target_dir: Path,
-        control_dir: Path,
         cache_dir: Path,
         resolution: int,
     ) -> str:
@@ -253,10 +224,7 @@ class TrainingPreparer:
             "bucket_no_upscale = false\n\n"
             "[[datasets]]\n"
             f'image_directory = "{q(target_dir)}"\n'
-            f'control_directory = "{q(control_dir)}"\n'
             f'cache_directory = "{q(cache_dir)}"\n'
-            "control_resolution = [1024, 1024]\n"
-            "no_resize_control = false\n"
             "num_repeats = 1\n"
         )
 
@@ -265,7 +233,7 @@ class TrainingPreparer:
         values = (
             ("Musubi", options.musubi_dir, True),
             ("Python", options.python_exe, False),
-            ("DiT", options.dit_path, False),
+            ("Qwen-Image DiT", options.dit_path, False),
             ("VAE", options.vae_path, False),
             ("Text Encoder", options.text_encoder_path, False),
         )
@@ -320,42 +288,66 @@ class TrainingPreparer:
 
         latent_cmd = (
             '"%PYTHON%" "%MUSUBI%\\src\\musubi_tuner\\qwen_image_cache_latents.py" '
-            '--dataset_config "%CONFIG%" --vae "%VAE%" --model_version edit-2511'
+            '--dataset_config "%CONFIG%" --vae "%VAE%" --model_version original'
         )
         text_cmd = (
             '"%PYTHON%" "%MUSUBI%\\src\\musubi_tuner\\qwen_image_cache_text_encoder_outputs.py" '
             '--dataset_config "%CONFIG%" --text_encoder "%TEXT_ENCODER%" '
-            '--batch_size 1 --model_version edit-2511 --fp8_vl'
+            '--batch_size 1 --model_version original --fp8_vl'
         )
 
         train_args = [
-            '"%PYTHON%"', "-m", "accelerate.commands.launch",
-            "--num_cpu_threads_per_process", "1",
-            "--mixed_precision", "bf16",
+            '"%PYTHON%"',
+            "-m",
+            "accelerate.commands.launch",
+            "--num_cpu_threads_per_process",
+            "1",
+            "--mixed_precision",
+            "bf16",
             '"%MUSUBI%\\src\\musubi_tuner\\qwen_image_train_network.py"',
-            "--dit", '"%DIT%"',
-            "--vae", '"%VAE%"',
-            "--text_encoder", '"%TEXT_ENCODER%"',
-            "--dataset_config", '"%CONFIG%"',
-            "--model_version", "edit-2511",
+            "--dit",
+            '"%DIT%"',
+            "--vae",
+            '"%VAE%"',
+            "--text_encoder",
+            '"%TEXT_ENCODER%"',
+            "--dataset_config",
+            '"%CONFIG%"',
+            "--model_version",
+            "original",
             "--sdpa",
-            "--mixed_precision", "bf16",
-            "--timestep_sampling", "shift",
-            "--weighting_scheme", "none",
-            "--discrete_flow_shift", "2.2",
-            "--optimizer_type", "adamw8bit",
-            "--learning_rate", options.learning_rate,
+            "--mixed_precision",
+            "bf16",
+            "--timestep_sampling",
+            "shift",
+            "--weighting_scheme",
+            "none",
+            "--discrete_flow_shift",
+            "2.2",
+            "--optimizer_type",
+            "adamw8bit",
+            "--learning_rate",
+            options.learning_rate,
             "--gradient_checkpointing",
-            "--max_data_loader_n_workers", "2",
+            "--max_data_loader_n_workers",
+            "2",
             "--persistent_data_loader_workers",
-            "--network_module", "networks.lora_qwen_image",
-            "--network_dim", str(options.rank),
-            "--network_alpha", str(options.rank),
-            "--max_train_epochs", str(options.epochs),
-            "--save_every_n_epochs", "1",
-            "--seed", "42",
-            "--output_dir", '"%OUTPUT_DIR%"',
-            "--output_name", options.output_name,
+            "--network_module",
+            "networks.lora_qwen_image",
+            "--network_dim",
+            str(options.rank),
+            "--network_alpha",
+            str(options.rank),
+            "--max_train_epochs",
+            str(options.epochs),
+            "--save_every_n_epochs",
+            "1",
+            "--seed",
+            "42",
+            "--output_dir",
+            '"%OUTPUT_DIR%"',
+            "--output_name",
+            options.output_name,
             "--fp8_base",
             "--fp8_scaled",
             "--fp8_vl",
@@ -365,15 +357,21 @@ class TrainingPreparer:
         train_cmd = " ".join(train_args)
 
         cache_latents.write_text(
-            common_header + latent_cmd + "\nif errorlevel 1 exit /b %errorlevel%\n",
+            common_header
+            + latent_cmd
+            + "\nif errorlevel 1 exit /b %errorlevel%\n",
             encoding="utf-8",
         )
         cache_text.write_text(
-            common_header + text_cmd + "\nif errorlevel 1 exit /b %errorlevel%\n",
+            common_header
+            + text_cmd
+            + "\nif errorlevel 1 exit /b %errorlevel%\n",
             encoding="utf-8",
         )
         train.write_text(
-            common_header + train_cmd + "\nif errorlevel 1 exit /b %errorlevel%\n",
+            common_header
+            + train_cmd
+            + "\nif errorlevel 1 exit /b %errorlevel%\n",
             encoding="utf-8",
         )
         run_all.write_text(
@@ -398,9 +396,13 @@ class TrainingPreparer:
         )
 
         preview = (
-            "[1] Latent cache\n" + latent_cmd + "\n\n"
-            "[2] Text encoder cache\n" + text_cmd + "\n\n"
-            "[3] LoRA train\n" + train_cmd
+            "[Identity LoRA / Qwen-Image original / Control 없음]\n\n"
+            "[1] Latent cache\n"
+            + latent_cmd
+            + "\n\n[2] Text encoder cache\n"
+            + text_cmd
+            + "\n\n[3] LoRA train\n"
+            + train_cmd
         )
         return {
             "cache_latents": cache_latents,
