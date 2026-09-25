@@ -4,7 +4,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-from PySide6.QtCore import QSize, QThread, Qt
+from PySide6.QtCore import QProcess, QSize, QThread, Qt
 from PySide6.QtGui import (
     QColor,
     QDragEnterEvent,
@@ -17,6 +17,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QFileDialog,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -24,9 +25,12 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QMessageBox,
+    QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QSpinBox,
     QSplitter,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -38,6 +42,7 @@ from loradatasetmaker.core.indexer import (
     SUPPORTED_EXTENSIONS,
     index_image_folder,
 )
+from loradatasetmaker.core.training import TrainingPreparer, TrainingPrepOptions
 from loradatasetmaker.ui.analysis_worker import AnalysisWorker
 from loradatasetmaker.ui.identity_worker import IdentityWorker
 from loradatasetmaker.ui.vision_worker import VisionWorker
@@ -53,6 +58,8 @@ class MainWindow(QMainWindow):
         self.reference_identity: ReferenceIdentity | None = None
         self.identity_matcher = IdentityMatcher()
         self.exporter = DatasetExporter()
+        self.training_preparer = TrainingPreparer()
+        self.training_run_script: Path | None = None
 
         self.analysis_thread: QThread | None = None
         self.analysis_worker: AnalysisWorker | None = None
@@ -71,8 +78,8 @@ class MainWindow(QMainWindow):
         self._refresh_counts()
 
     def _build_ui(self) -> None:
-        root = QWidget()
-        layout = QVBoxLayout(root)
+        dataset_page = QWidget()
+        layout = QVBoxLayout(dataset_page)
         layout.setContentsMargins(14, 14, 14, 14)
         layout.setSpacing(10)
 
@@ -216,7 +223,340 @@ class MainWindow(QMainWindow):
 
         splitter.addWidget(detail)
         splitter.setSizes([900, 600])
-        self.setCentralWidget(root)
+
+        self.tabs = QTabWidget()
+        self.tabs.addTab(dataset_page, "Dataset")
+        self.tabs.addTab(self._build_training_page(), "Training")
+        self.setCentralWidget(self.tabs)
+
+    def _build_training_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(12)
+
+        title = QLabel("Qwen Image Edit 2511 - LoRA Training")
+        title.setStyleSheet("font-size: 17px; font-weight: 600;")
+        layout.addWidget(title)
+
+        note = QLabel(
+            "현재 0013은 Musubi Tuner 기반 학습 준비/실행 런처야. "
+            "Edit-2511 학습은 accepted target뿐 아니라 같은 파일명의 "
+            "control/source 이미지 pair가 필요해. 원본 데이터셋은 수정하지 않아."
+        )
+        note.setWordWrap(True)
+        layout.addWidget(note)
+
+        data_group = QGroupBox("Dataset")
+        data_layout = QVBoxLayout(data_group)
+
+        self.training_dataset_edit = QLineEdit()
+        self.training_dataset_edit.setPlaceholderText("accepted 폴더")
+        data_layout.addLayout(
+            self._training_path_row(
+                "Accepted",
+                self.training_dataset_edit,
+                False,
+            )
+        )
+
+        self.training_control_edit = QLineEdit()
+        self.training_control_edit.setPlaceholderText(
+            "Qwen Edit source/control 폴더 (target과 파일명 stem 동일)"
+        )
+        data_layout.addLayout(
+            self._training_path_row(
+                "Control",
+                self.training_control_edit,
+                False,
+            )
+        )
+
+        self.training_workspace_edit = QLineEdit()
+        self.training_workspace_edit.setPlaceholderText("학습 작업 폴더")
+        data_layout.addLayout(
+            self._training_path_row(
+                "Workspace",
+                self.training_workspace_edit,
+                False,
+            )
+        )
+
+        trigger_row = QHBoxLayout()
+        trigger_row.addWidget(QLabel("Trigger"))
+        self.training_trigger_edit = QLineEdit()
+        self.training_trigger_edit.setPlaceholderText("예: personA")
+        trigger_row.addWidget(self.training_trigger_edit, 1)
+        trigger_row.addWidget(QLabel("Output name"))
+        self.training_output_name_edit = QLineEdit("identity_qwen2511")
+        trigger_row.addWidget(self.training_output_name_edit, 1)
+        data_layout.addLayout(trigger_row)
+        layout.addWidget(data_group)
+
+        engine_group = QGroupBox("Musubi Tuner / Model")
+        engine_layout = QVBoxLayout(engine_group)
+
+        self.training_musubi_edit = QLineEdit()
+        self.training_musubi_edit.setPlaceholderText("musubi-tuner 폴더")
+        engine_layout.addLayout(
+            self._training_path_row("Musubi", self.training_musubi_edit, False)
+        )
+
+        self.training_python_edit = QLineEdit()
+        self.training_python_edit.setPlaceholderText(
+            "Musubi venv의 python.exe"
+        )
+        engine_layout.addLayout(
+            self._training_path_row("Python", self.training_python_edit, True)
+        )
+
+        self.training_dit_edit = QLineEdit()
+        self.training_dit_edit.setPlaceholderText(
+            "qwen_image_edit_2511_bf16.safetensors"
+        )
+        engine_layout.addLayout(
+            self._training_path_row("DiT 2511", self.training_dit_edit, True)
+        )
+
+        self.training_vae_edit = QLineEdit()
+        self.training_vae_edit.setPlaceholderText(
+            "qwen_image_vae.safetensors"
+        )
+        engine_layout.addLayout(
+            self._training_path_row("VAE", self.training_vae_edit, True)
+        )
+
+        self.training_text_encoder_edit = QLineEdit()
+        self.training_text_encoder_edit.setPlaceholderText(
+            "qwen_2.5_vl_7b*.safetensors"
+        )
+        engine_layout.addLayout(
+            self._training_path_row(
+                "Text Encoder",
+                self.training_text_encoder_edit,
+                True,
+            )
+        )
+
+        self.training_output_dir_edit = QLineEdit()
+        self.training_output_dir_edit.setPlaceholderText("LoRA 출력 폴더")
+        engine_layout.addLayout(
+            self._training_path_row(
+                "Output folder",
+                self.training_output_dir_edit,
+                False,
+            )
+        )
+        layout.addWidget(engine_group)
+
+        settings_group = QGroupBox("1차 학습 설정")
+        settings = QHBoxLayout(settings_group)
+
+        settings.addWidget(QLabel("Resolution"))
+        self.training_resolution_spin = QSpinBox()
+        self.training_resolution_spin.setRange(512, 1536)
+        self.training_resolution_spin.setSingleStep(64)
+        self.training_resolution_spin.setValue(1024)
+        settings.addWidget(self.training_resolution_spin)
+
+        settings.addWidget(QLabel("Rank"))
+        self.training_rank_spin = QSpinBox()
+        self.training_rank_spin.setRange(4, 256)
+        self.training_rank_spin.setValue(16)
+        settings.addWidget(self.training_rank_spin)
+
+        settings.addWidget(QLabel("Epoch"))
+        self.training_epoch_spin = QSpinBox()
+        self.training_epoch_spin.setRange(1, 100)
+        self.training_epoch_spin.setValue(8)
+        settings.addWidget(self.training_epoch_spin)
+
+        settings.addWidget(QLabel("LR"))
+        self.training_lr_edit = QLineEdit("5e-5")
+        self.training_lr_edit.setMaximumWidth(90)
+        settings.addWidget(self.training_lr_edit)
+
+        settings.addWidget(QLabel("Blocks swap"))
+        self.training_blocks_spin = QSpinBox()
+        self.training_blocks_spin.setRange(0, 60)
+        self.training_blocks_spin.setValue(45)
+        settings.addWidget(self.training_blocks_spin)
+        settings.addStretch(1)
+        layout.addWidget(settings_group)
+
+        memory_note = QLabel(
+            "12GB VRAM에서는 block swap/fp8 절약 옵션이 필요할 수 있고 "
+            "시스템 RAM 사용량이 크게 늘 수 있어. 0013은 설정을 자동 생성하지만 "
+            "실제 첫 학습은 로그를 보면서 조정하는 전제로 잡았어."
+        )
+        memory_note.setWordWrap(True)
+        layout.addWidget(memory_note)
+
+        action_row = QHBoxLayout()
+        self.training_prepare_button = QPushButton("학습 준비")
+        self.training_prepare_button.clicked.connect(self._prepare_training)
+        action_row.addWidget(self.training_prepare_button)
+
+        self.training_run_button = QPushButton("Train 실행")
+        self.training_run_button.setEnabled(False)
+        self.training_run_button.clicked.connect(self._run_training)
+        action_row.addWidget(self.training_run_button)
+
+        self.training_status_label = QLabel("대기")
+        action_row.addWidget(self.training_status_label, 1)
+        layout.addLayout(action_row)
+
+        self.training_command_preview = QPlainTextEdit()
+        self.training_command_preview.setReadOnly(True)
+        self.training_command_preview.setPlaceholderText(
+            "학습 준비 후 dataset.toml / cache / train 명령을 여기서 확인할 수 있어."
+        )
+        layout.addWidget(self.training_command_preview, 1)
+
+        return page
+
+    def _training_path_row(
+        self,
+        title: str,
+        edit: QLineEdit,
+        file_mode: bool,
+    ) -> QHBoxLayout:
+        row = QHBoxLayout()
+        label = QLabel(title)
+        label.setMinimumWidth(95)
+        row.addWidget(label)
+        row.addWidget(edit, 1)
+        button = QPushButton("찾기")
+        button.clicked.connect(
+            lambda _checked=False, target=edit, is_file=file_mode:
+            self._choose_training_path(target, is_file)
+        )
+        row.addWidget(button)
+        return row
+
+    def _choose_training_path(
+        self,
+        target: QLineEdit,
+        file_mode: bool,
+    ) -> None:
+        if file_mode:
+            selected, _ = QFileDialog.getOpenFileName(
+                self,
+                "파일 선택",
+            )
+        else:
+            selected = QFileDialog.getExistingDirectory(
+                self,
+                "폴더 선택",
+            )
+        if selected:
+            target.setText(selected)
+
+    def _prepare_training(self) -> None:
+        dataset_text = self.training_dataset_edit.text().strip()
+        workspace_text = self.training_workspace_edit.text().strip()
+        output_text = self.training_output_dir_edit.text().strip()
+        if not dataset_text or not workspace_text or not output_text:
+            QMessageBox.warning(
+                self,
+                "Training 준비",
+                "Accepted / Workspace / Output folder를 먼저 지정해줘.",
+            )
+            return
+
+        control_text = self.training_control_edit.text().strip()
+        options = TrainingPrepOptions(
+            dataset_dir=Path(dataset_text),
+            control_dir=Path(control_text) if control_text else None,
+            workspace_dir=Path(workspace_text),
+            musubi_dir=(
+                Path(self.training_musubi_edit.text().strip())
+                if self.training_musubi_edit.text().strip()
+                else None
+            ),
+            python_exe=(
+                Path(self.training_python_edit.text().strip())
+                if self.training_python_edit.text().strip()
+                else None
+            ),
+            dit_path=(
+                Path(self.training_dit_edit.text().strip())
+                if self.training_dit_edit.text().strip()
+                else None
+            ),
+            vae_path=(
+                Path(self.training_vae_edit.text().strip())
+                if self.training_vae_edit.text().strip()
+                else None
+            ),
+            text_encoder_path=(
+                Path(self.training_text_encoder_edit.text().strip())
+                if self.training_text_encoder_edit.text().strip()
+                else None
+            ),
+            output_dir=Path(output_text),
+            trigger_token=self.training_trigger_edit.text().strip(),
+            output_name=self.training_output_name_edit.text().strip(),
+            resolution=self.training_resolution_spin.value(),
+            rank=self.training_rank_spin.value(),
+            epochs=self.training_epoch_spin.value(),
+            learning_rate=self.training_lr_edit.text().strip(),
+            blocks_to_swap=self.training_blocks_spin.value(),
+        )
+
+        try:
+            result = self.training_preparer.prepare(options)
+        except Exception as exc:  # noqa: BLE001
+            self.training_run_script = None
+            self.training_run_button.setEnabled(False)
+            QMessageBox.critical(self, "Training 준비 실패", str(exc))
+            return
+
+        self.training_run_script = result.run_script
+        self.training_run_button.setEnabled(result.ready_to_train)
+        self.training_command_preview.setPlainText(result.command_preview)
+
+        if result.ready_to_train:
+            self.training_status_label.setText(
+                f"준비 완료 / {result.item_count}장 / Train 가능"
+            )
+        else:
+            self.training_status_label.setText(
+                f"Dataset 준비 완료 / {result.item_count}장 / pair 또는 경로 확인 필요"
+            )
+
+        if result.warnings:
+            QMessageBox.information(
+                self,
+                "Training 준비 결과",
+                "\n".join(result.warnings),
+            )
+
+    def _run_training(self) -> None:
+        if self.training_run_script is None:
+            return
+        script = self.training_run_script
+        if not script.is_file():
+            QMessageBox.warning(
+                self,
+                "Train 실행",
+                "run_all.bat을 찾지 못했어. 학습 준비를 다시 실행해줘.",
+            )
+            return
+
+        ok = QProcess.startDetached(
+            "cmd.exe",
+            ["/c", str(script)],
+            str(script.parent),
+        )
+        if not ok:
+            QMessageBox.critical(
+                self,
+                "Train 실행 실패",
+                "Training 콘솔을 시작하지 못했어.",
+            )
+            return
+        self.training_status_label.setText("Training 콘솔 실행됨")
 
     def _make_preview_label(self, text: str) -> QLabel:
         label = QLabel(text)
@@ -708,10 +1048,26 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Export 실패", str(exc))
             return
 
+        export_root = Path(selected)
+        accepted_dir = export_root / "accepted"
+        self.training_dataset_edit.setText(str(accepted_dir))
+        if not self.training_workspace_edit.text().strip():
+            self.training_workspace_edit.setText(
+                str(export_root / "training_qwen2511")
+            )
+        if not self.training_output_dir_edit.text().strip():
+            self.training_output_dir_edit.setText(
+                str(export_root / "lora_output")
+            )
+        trigger = self.trigger_edit.text().strip()
+        if trigger and not self.training_trigger_edit.text().strip():
+            self.training_trigger_edit.setText(trigger)
+
         QMessageBox.information(
             self,
             "Export 완료",
-            "accepted / review / rejected / logs 폴더로 내보냈어.",
+            "accepted / review / rejected / logs 폴더로 내보냈어. "
+            "Training 탭의 Accepted 경로도 자동으로 연결했어.",
         )
 
     def _populate_list(self) -> None:

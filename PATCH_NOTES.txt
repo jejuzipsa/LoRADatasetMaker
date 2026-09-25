@@ -143,3 +143,23 @@ LoRADatasetMaker PATCH NOTES
 - Vision 후보에서 crop_touches_edge 단독 조건 제거
 - Vision 품질점수 후보 기준을 88 미만에서 70 미만으로 완화
 - 패키지 버전 0.0.12
+
+0013 - Qwen Image Edit 2511 Training section
+- Dataset / Training 2개 탭으로 UI 확장
+- Training 탭에 Qwen Image Edit 2511 + Musubi Tuner 학습 준비 UI 추가
+- accepted 데이터셋 폴더, control/source pair 폴더, workspace, output 경로 선택 지원
+- Musubi Tuner / Python / 2511 DiT / VAE / Qwen2.5-VL Text Encoder 경로 지정 지원
+- Trigger token과 LoRA output name 입력 지원
+- Resolution / Rank / Epoch / Learning Rate / Blocks-to-swap 1차 설정 UI 추가
+- 원본 accepted 폴더는 수정하지 않고 training workspace에 이미지/TXT를 복사
+- workspace 복사본 TXT 앞에 공통 Trigger token 자동 삽입
+- Qwen-Image-Edit-2511 요구사항에 맞춰 target-control 파일명 stem pair 검증
+- Musubi용 dataset.toml 자동 생성
+- control_resolution = [1024, 1024], model_version edit-2511 기준 설정
+- latent cache / text encoder cache / LoRA train BAT 자동 생성
+- fp8_base / fp8_scaled / fp8_vl / gradient checkpointing / block swap 메모리 절약 옵션 포함
+- 모든 pair와 필수 경로가 준비된 경우에만 Train 실행 버튼 활성화
+- Train 실행 시 별도 콘솔에서 run_all.bat 실행
+- Export 완료 후 accepted / workspace / output 경로와 Trigger를 Training 탭에 자동 연결
+- training_manifest.json에 준비 상태/누락 pair/설정 기록
+- 패키지 버전 0.0.13

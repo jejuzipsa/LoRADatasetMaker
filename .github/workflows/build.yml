@@ -37,7 +37,7 @@ jobs:
       - name: Smoke import core modules
         shell: pwsh
         run: |
-          python -c "from loradatasetmaker.core.analyzer import FaceAnalyzer; FaceAnalyzer(); from loradatasetmaker.core.identity import IdentityMatcher; from loradatasetmaker.core.quality import QualityAnalyzer; from loradatasetmaker.core.vision import OllamaVisionReviewer; from loradatasetmaker.core.exporter import DatasetExporter; print('core import OK')"
+          python -c "from loradatasetmaker.core.analyzer import FaceAnalyzer; FaceAnalyzer(); from loradatasetmaker.core.identity import IdentityMatcher; from loradatasetmaker.core.quality import QualityAnalyzer; from loradatasetmaker.core.vision import OllamaVisionReviewer; from loradatasetmaker.core.exporter import DatasetExporter; from loradatasetmaker.core.training import TrainingPreparer; TrainingPreparer(); print('core import OK')"
 
       - name: Install PyInstaller
         run: pip install pyinstaller
