@@ -78,55 +78,63 @@ class QualityAnalyzer:
         review = False
         reject = False
 
-        if face_px < 64:
+        # Keep normal usable images ACCEPTED by default.  These thresholds are
+        # intentionally conservative: only clearly weak training samples should
+        # be demoted automatically.
+        if face_px < 48:
             score -= 55
             reject = True
             record.auto_reasons.append("quality_face_too_small")
-        elif face_px < 96:
-            score -= 32
+        elif face_px < 72:
+            score -= 25
             review = True
             record.auto_reasons.append("quality_face_small")
-        elif face_px < 140:
-            score -= 15
-            review = True
+        elif face_px < 96:
+            score -= 8
             record.auto_reasons.append("quality_face_marginal")
 
-        if record.blur_score < 25:
-            score -= 45
+        if record.blur_score < 12:
+            score -= 50
             reject = True
             record.auto_reasons.append("quality_blur_heavy")
-        elif record.blur_score < 60:
-            score -= 24
+        elif record.blur_score < 28:
+            score -= 22
             review = True
             record.auto_reasons.append("quality_blur")
+        elif record.blur_score < 45:
+            score -= 6
+            record.auto_reasons.append("quality_blur_mild")
 
-        if record.exposure_mean < 18 or record.exposure_mean > 238:
+        if record.exposure_mean < 10 or record.exposure_mean > 245:
             score -= 35
             reject = True
             record.auto_reasons.append("quality_exposure_extreme")
-        elif record.exposure_mean < 38 or record.exposure_mean > 218:
-            score -= 16
+        elif record.exposure_mean < 25 or record.exposure_mean > 230:
+            score -= 14
             review = True
             record.auto_reasons.append("quality_exposure")
 
+        # A crop touching the source boundary is useful diagnostic information,
+        # but is not a defect by itself.  Hair/head content may still be fully
+        # present, so do not demote the image for this reason alone.
         if record.crop_touches_edge:
-            score -= 10
-            review = True
+            score -= 3
             record.auto_reasons.append("quality_crop_touches_edge")
 
+        # YuNet already has its own detection threshold.  A slightly lower
+        # confidence should be visible in the log, not force a REVIEW.
         if (
             record.detection_confidence is not None
-            and record.detection_confidence < 0.94
+            and record.detection_confidence < 0.90
         ):
-            score -= 8
-            review = True
+            score -= 3
             record.auto_reasons.append("quality_detection_confidence")
 
         record.quality_score = max(0.0, min(100.0, score))
 
         if reject:
             record.quality_status = DatasetStatus.REJECTED
-        elif review or record.quality_score < 80:
+        elif review:
             record.quality_status = DatasetStatus.REVIEW
         else:
             record.quality_status = DatasetStatus.ACCEPTED

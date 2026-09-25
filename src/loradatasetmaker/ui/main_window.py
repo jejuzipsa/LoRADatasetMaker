@@ -577,8 +577,7 @@ class MainWindow(QMainWindow):
             if (
                 record.auto_status is DatasetStatus.REVIEW
                 or quality is None
-                or quality < 88
-                or record.crop_touches_edge
+                or quality < 70
                 or record.detected_faces_count > 1
             ):
                 candidates.append(record)
