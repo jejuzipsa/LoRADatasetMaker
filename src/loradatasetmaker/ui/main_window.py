@@ -45,6 +45,11 @@ from loradatasetmaker.core.indexer import (
 from loradatasetmaker.core.training import TrainingPreparer, TrainingPrepOptions
 from loradatasetmaker.ui.analysis_worker import AnalysisWorker
 from loradatasetmaker.ui.identity_worker import IdentityWorker
+from loradatasetmaker.ui.musubi_install_worker import (
+    MUSUBI_VERSION,
+    MusubiInstallWorker,
+    default_tools_root,
+)
 from loradatasetmaker.ui.vision_worker import VisionWorker
 
 
@@ -67,6 +72,8 @@ class MainWindow(QMainWindow):
         self.identity_worker: IdentityWorker | None = None
         self.vision_thread: QThread | None = None
         self.vision_worker: VisionWorker | None = None
+        self.musubi_thread: QThread | None = None
+        self.musubi_worker: MusubiInstallWorker | None = None
 
         self.setWindowTitle("LoRA Dataset Maker")
         self.resize(1500, 920)
@@ -313,15 +320,37 @@ class MainWindow(QMainWindow):
         self.training_model_scan_label.setWordWrap(True)
         engine_layout.addWidget(self.training_model_scan_label)
 
+        musubi_row = QHBoxLayout()
+        musubi_label = QLabel("Musubi")
+        musubi_label.setMinimumWidth(95)
+        musubi_row.addWidget(musubi_label)
         self.training_musubi_edit = QLineEdit()
         self.training_musubi_edit.setPlaceholderText("musubi-tuner 폴더")
-        engine_layout.addLayout(
-            self._training_path_row("Musubi", self.training_musubi_edit, False)
+        musubi_row.addWidget(self.training_musubi_edit, 1)
+        musubi_browse = QPushButton("찾기")
+        musubi_browse.clicked.connect(
+            lambda: self._choose_training_path(
+                self.training_musubi_edit,
+                False,
+            )
         )
+        musubi_row.addWidget(musubi_browse)
+        self.training_musubi_install_button = QPushButton("자동 설치")
+        self.training_musubi_install_button.clicked.connect(
+            self._install_musubi
+        )
+        musubi_row.addWidget(self.training_musubi_install_button)
+        engine_layout.addLayout(musubi_row)
+
+        self.training_musubi_status_label = QLabel(
+            f"자동 설치: Musubi Tuner {MUSUBI_VERSION} + 전용 Python 3.11 + CUDA 12.8 환경"
+        )
+        self.training_musubi_status_label.setWordWrap(True)
+        engine_layout.addWidget(self.training_musubi_status_label)
 
         self.training_python_edit = QLineEdit()
         self.training_python_edit.setPlaceholderText(
-            "Musubi venv의 python.exe"
+            "Musubi 전용 .venv의 python.exe"
         )
         engine_layout.addLayout(
             self._training_path_row("Python", self.training_python_edit, True)
@@ -435,6 +464,7 @@ class MainWindow(QMainWindow):
         )
         layout.addWidget(self.training_command_preview, 1)
 
+        self._detect_local_musubi_install()
         return page
 
     def _training_path_row(
@@ -473,6 +503,92 @@ class MainWindow(QMainWindow):
             )
         if selected:
             target.setText(selected)
+
+    def _detect_local_musubi_install(self) -> None:
+        tools_root = default_tools_root()
+        musubi_dir = tools_root / "musubi-tuner"
+        python_exe = musubi_dir / ".venv" / "Scripts" / "python.exe"
+        if musubi_dir.is_dir() and python_exe.is_file():
+            self.training_musubi_edit.setText(str(musubi_dir))
+            self.training_python_edit.setText(str(python_exe))
+            self.training_musubi_status_label.setText(
+                f"설치됨: {MUSUBI_VERSION} / 전용 Python 환경 확인됨"
+            )
+
+    def _install_musubi(self) -> None:
+        if self.musubi_thread is not None:
+            return
+
+        self.training_musubi_install_button.setEnabled(False)
+        self.training_prepare_button.setEnabled(False)
+        self.training_run_button.setEnabled(False)
+        self.training_musubi_status_label.setText(
+            "Musubi 자동 설치 준비 중..."
+        )
+
+        self.musubi_thread = QThread(self)
+        self.musubi_worker = MusubiInstallWorker()
+        self.musubi_worker.moveToThread(self.musubi_thread)
+
+        self.musubi_thread.started.connect(self.musubi_worker.run)
+        self.musubi_worker.status.connect(
+            self.training_musubi_status_label.setText
+        )
+        self.musubi_worker.finished.connect(
+            self._on_musubi_install_finished
+        )
+        self.musubi_worker.failed.connect(
+            self._on_musubi_install_failed
+        )
+
+        self.musubi_worker.finished.connect(self.musubi_thread.quit)
+        self.musubi_worker.failed.connect(self.musubi_thread.quit)
+        self.musubi_worker.finished.connect(
+            self.musubi_worker.deleteLater
+        )
+        self.musubi_worker.failed.connect(
+            self.musubi_worker.deleteLater
+        )
+        self.musubi_thread.finished.connect(
+            self._on_musubi_install_thread_finished
+        )
+        self.musubi_thread.finished.connect(
+            self.musubi_thread.deleteLater
+        )
+        self.musubi_thread.start()
+
+    def _on_musubi_install_finished(
+        self,
+        musubi_path: str,
+        python_path: str,
+        version: str,
+    ) -> None:
+        self.training_musubi_edit.setText(musubi_path)
+        self.training_python_edit.setText(python_path)
+        self.training_musubi_status_label.setText(
+            f"설치 완료: Musubi Tuner {version} / 전용 Python 3.11"
+        )
+        self.training_prepare_button.setEnabled(True)
+        QMessageBox.information(
+            self,
+            "Musubi 설치 완료",
+            "Musubi Tuner와 전용 Python 환경 설치가 끝났어. "
+            "이제 학습 준비를 누르면 돼.",
+        )
+
+    def _on_musubi_install_failed(self, message: str) -> None:
+        self.training_musubi_status_label.setText("Musubi 설치 실패")
+        self.training_prepare_button.setEnabled(True)
+        QMessageBox.critical(
+            self,
+            "Musubi 자동 설치 실패",
+            message,
+        )
+
+    def _on_musubi_install_thread_finished(self) -> None:
+        self.musubi_thread = None
+        self.musubi_worker = None
+        self.training_musubi_install_button.setEnabled(True)
 
     def _scan_comfyui_models(self) -> None:
         root_text = self.training_comfyui_edit.text().strip()
