@@ -17,6 +17,7 @@ Windows용 로컬 LoRA 학습 데이터셋 전처리/검수 도구.
 - 0012: 자동 품질 판정 완화 + 불필요한 REVIEW 감소
 - 0013: Qwen Image Edit 2511 Training 준비/실행 섹션
 - 0014: Identity LoRA 기본 모드로 전환 / Control 요구 제거
+- 0015: ComfyUI Qwen 모델 자동 검색
 
 ## 1차 목표
 사진을 대량 투입하면 동일 인물 후보를 분류하고, Head/Portrait 학습용 크롭·품질 검사·Vision 검수·중복 판정·얼굴 방향 분석·캡션 생성을 수행한 뒤, 사용자가 모든 채택/제외/보류 결과를 최종 검수하여 LoRA 학습용 데이터셋으로 Export한다.
@@ -46,6 +47,7 @@ Windows용 로컬 LoRA 학습 데이터셋 전처리/검수 도구.
 - Musubi Tuner Identity LoRA Training 탭 (Control 불필요)
 - Trigger 자동 삽입 학습 workspace 생성
 - Qwen-Image base용 dataset.toml / cache / train BAT 생성
+- ComfyUI models 폴더에서 Qwen-Image DiT / VAE / Text Encoder 자동 검색
 - GitHub Actions 자동 검사
 - Windows EXE 자동 빌드 artifact
 
@@ -96,3 +98,10 @@ Musubi Tuner에서 Qwen-Image-Edit-2511의 직접 학습은 control/source 이�
 학습 준비 시 원본 accepted 폴더를 수정하지 않고 workspace로 복사하며 TXT 앞에 Trigger token을 자동 삽입한다. workspace에는 dataset.toml, training_manifest.json 및 scripts/01_cache_latents.bat, 02_cache_text.bat, 03_train.bat, run_all.bat을 생성한다.
 
 이 Identity LoRA를 Edit-2511에서 사용하는 부분은 직접 Edit-2511을 control 없이 학습한다는 의미가 아니며, 실제 ComfyUI 호환성/재현 결과는 생성 후 테스트 대상으로 둔다.
+
+
+## ComfyUI 모델 자동 검색
+
+Training 탭에서 ComfyUI 루트를 지정하고 `모델 자동 검색`을 누르면 `models/diffusion_models`, `models/unet`, `models/checkpoints`, `models/vae`, `models/text_encoders`, `models/clip` 순으로 필요한 Qwen-Image 학습 모델을 찾는다.
+
+Identity LoRA 모드에서는 Qwen-Image-Edit-2511 DiT를 자동 선택하지 않으며, `qwen_image_bf16.safetensors`, `qwen_image_vae.safetensors`, `qwen_2.5_vl_7b.safetensors` 같은 표준 Qwen-Image 학습용 파일을 우선한다.

@@ -178,3 +178,17 @@ LoRADatasetMaker PATCH NOTES
 - Edit-2511 직접 학습은 Musubi 규격상 control/source가 필요한 별도 Edit-LoRA 모드로 분리
 - Training workspace / manifest에 identity_no_control 모드 명시
 - 패키지 버전 0.0.14
+
+0015 - ComfyUI model auto discovery
+- Training 탭에 ComfyUI 루트 경로 입력/선택 UI 추가
+- ComfyUI models 폴더에서 Qwen-Image 학습용 모델 자동 검색 버튼 추가
+- models/diffusion_models, models/unet, models/checkpoints 우선 검색
+- qwen_image_bf16.safetensors 정확 일치 파일을 Qwen-Image DiT 1순위로 사용
+- Edit/Layered/VAE/Text 계열 파일은 Identity DiT 자동 선택에서 제외
+- models/vae에서 qwen_image_vae.safetensors 자동 검색
+- models/text_encoders 및 models/clip에서 qwen_2.5_vl_7b.safetensors 자동 검색
+- Text Encoder fallback 검색 시 fp8/scaled 이름은 자동 선택에서 제외
+- 찾은 모델 경로를 Training 입력칸에 자동 입력
+- 일부 모델만 발견된 경우 발견 항목/누락 항목을 팝업과 상태 문구로 표시
+- ComfyUI 내부 모델을 재사용하므로 동일 모델을 중복 다운로드할 필요 없음
+- 패키지 버전 0.0.15

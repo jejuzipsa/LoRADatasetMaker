@@ -285,6 +285,34 @@ class MainWindow(QMainWindow):
         engine_group = QGroupBox("Musubi Tuner / Model")
         engine_layout = QVBoxLayout(engine_group)
 
+        comfy_row = QHBoxLayout()
+        comfy_label = QLabel("ComfyUI")
+        comfy_label.setMinimumWidth(95)
+        comfy_row.addWidget(comfy_label)
+        self.training_comfyui_edit = QLineEdit()
+        self.training_comfyui_edit.setPlaceholderText(
+            "ComfyUI 루트 폴더 (예: D:\\ComfyUI)"
+        )
+        comfy_row.addWidget(self.training_comfyui_edit, 1)
+        comfy_browse = QPushButton("찾기")
+        comfy_browse.clicked.connect(
+            lambda: self._choose_training_path(
+                self.training_comfyui_edit,
+                False,
+            )
+        )
+        comfy_row.addWidget(comfy_browse)
+        comfy_scan = QPushButton("모델 자동 검색")
+        comfy_scan.clicked.connect(self._scan_comfyui_models)
+        comfy_row.addWidget(comfy_scan)
+        engine_layout.addLayout(comfy_row)
+
+        self.training_model_scan_label = QLabel(
+            "ComfyUI 경로를 지정하면 Qwen-Image DiT / VAE / Text Encoder를 자동으로 찾아줘."
+        )
+        self.training_model_scan_label.setWordWrap(True)
+        engine_layout.addWidget(self.training_model_scan_label)
+
         self.training_musubi_edit = QLineEdit()
         self.training_musubi_edit.setPlaceholderText("musubi-tuner 폴더")
         engine_layout.addLayout(
@@ -445,6 +473,157 @@ class MainWindow(QMainWindow):
             )
         if selected:
             target.setText(selected)
+
+    def _scan_comfyui_models(self) -> None:
+        root_text = self.training_comfyui_edit.text().strip()
+        if not root_text:
+            selected = QFileDialog.getExistingDirectory(
+                self,
+                "ComfyUI 폴더 선택",
+            )
+            if not selected:
+                return
+            root_text = selected
+            self.training_comfyui_edit.setText(selected)
+
+        root = Path(root_text)
+        if not root.is_dir():
+            QMessageBox.warning(
+                self,
+                "ComfyUI 모델 검색",
+                "선택한 ComfyUI 폴더가 존재하지 않아.",
+            )
+            return
+
+        models_root = root / "models"
+        if not models_root.is_dir():
+            QMessageBox.warning(
+                self,
+                "ComfyUI 모델 검색",
+                "선택한 폴더 아래에서 models 폴더를 찾지 못했어.",
+            )
+            return
+
+        dit = self._find_comfyui_model(
+            models_root,
+            preferred_dirs=("diffusion_models", "unet", "checkpoints"),
+            exact_names=("qwen_image_bf16.safetensors",),
+            include_tokens=("qwen", "image"),
+            exclude_tokens=("edit", "layered", "vae", "text"),
+        )
+        vae = self._find_comfyui_model(
+            models_root,
+            preferred_dirs=("vae",),
+            exact_names=("qwen_image_vae.safetensors",),
+            include_tokens=("qwen", "image", "vae"),
+            exclude_tokens=(),
+        )
+        text_encoder = self._find_comfyui_model(
+            models_root,
+            preferred_dirs=("text_encoders", "clip"),
+            exact_names=("qwen_2.5_vl_7b.safetensors",),
+            include_tokens=("qwen", "2.5", "vl", "7b"),
+            exclude_tokens=("fp8", "scaled"),
+        )
+
+        found: list[str] = []
+        missing: list[str] = []
+
+        if dit is not None:
+            self.training_dit_edit.setText(str(dit))
+            found.append(f"DiT: {dit.name}")
+        else:
+            missing.append("Qwen-Image DiT")
+
+        if vae is not None:
+            self.training_vae_edit.setText(str(vae))
+            found.append(f"VAE: {vae.name}")
+        else:
+            missing.append("VAE")
+
+        if text_encoder is not None:
+            self.training_text_encoder_edit.setText(str(text_encoder))
+            found.append(f"Text Encoder: {text_encoder.name}")
+        else:
+            missing.append("Text Encoder")
+
+        if found:
+            self.training_model_scan_label.setText(
+                "자동 검색: " + " / ".join(found)
+            )
+        else:
+            self.training_model_scan_label.setText(
+                "자동 검색 결과: 호환 모델을 찾지 못했어."
+            )
+
+        message = []
+        if found:
+            message.append("찾은 모델\n" + "\n".join(found))
+        if missing:
+            message.append(
+                "못 찾은 항목\n" + "\n".join(missing)
+                + "\n\n해당 항목만 직접 찾아서 지정하면 돼."
+            )
+        QMessageBox.information(
+            self,
+            "ComfyUI 모델 자동 검색",
+            "\n\n".join(message),
+        )
+
+    @staticmethod
+    def _find_comfyui_model(
+        models_root: Path,
+        preferred_dirs: tuple[str, ...],
+        exact_names: tuple[str, ...],
+        include_tokens: tuple[str, ...],
+        exclude_tokens: tuple[str, ...],
+    ) -> Path | None:
+        search_roots: list[Path] = []
+        for folder_name in preferred_dirs:
+            candidate = models_root / folder_name
+            if candidate.is_dir():
+                search_roots.append(candidate)
+        if not search_roots:
+            search_roots.append(models_root)
+
+        exact_lower = {name.lower() for name in exact_names}
+
+        def compatible(path: Path) -> bool:
+            name = path.name.lower()
+            if path.suffix.lower() != ".safetensors":
+                return False
+            if any(token not in name for token in include_tokens):
+                return False
+            if any(token in name for token in exclude_tokens):
+                return False
+            return True
+
+        # Exact known filenames first.
+        for search_root in search_roots:
+            try:
+                for path in search_root.rglob("*.safetensors"):
+                    if path.name.lower() in exact_lower:
+                        return path
+            except OSError:
+                continue
+
+        # Then accept a conservative compatible filename.
+        for search_root in search_roots:
+            try:
+                candidates = sorted(
+                    (
+                        path
+                        for path in search_root.rglob("*.safetensors")
+                        if compatible(path)
+                    ),
+                    key=lambda path: (len(path.name), str(path).lower()),
+                )
+            except OSError:
+                continue
+            if candidates:
+                return candidates[0]
+
+        return None
 
     def _prepare_training(self) -> None:
         dataset_text = self.training_dataset_edit.text().strip()
