@@ -271,48 +271,54 @@ class TrainingPreparer:
         cache_latents = scripts_dir / "01_cache_latents.bat"
         cache_text = scripts_dir / "02_cache_text.bat"
         train = scripts_dir / "03_train.bat"
-        run_all = scripts_dir / "run_all.bat"
+        run_all_bat = scripts_dir / "run_all.bat"
+        run_all_py = scripts_dir / "run_all.py"
 
-        common_header = (
-            "@echo off\n"
-            "setlocal\n"
-            f'set "PYTHON={python}"\n'
-            f'set "MUSUBI={musubi}"\n'
-            f'set "CONFIG={config_path.resolve()}"\n'
-            f'set "DIT={dit}"\n'
-            f'set "VAE={vae}"\n'
-            f'set "TEXT_ENCODER={text_encoder}"\n'
-            f'set "OUTPUT_DIR={output_dir}"\n'
-            "\n"
-        )
-
-        latent_cmd = (
-            '"%PYTHON%" "%MUSUBI%\\src\\musubi_tuner\\qwen_image_cache_latents.py" '
-            '--dataset_config "%CONFIG%" --vae "%VAE%" --model_version original'
-        )
-        text_cmd = (
-            '"%PYTHON%" "%MUSUBI%\\src\\musubi_tuner\\qwen_image_cache_text_encoder_outputs.py" '
-            '--dataset_config "%CONFIG%" --text_encoder "%TEXT_ENCODER%" '
-            '--batch_size 1 --model_version original --fp8_vl'
-        )
-
+        latent_args = [
+            str(python),
+            str(musubi / "src" / "musubi_tuner" / "qwen_image_cache_latents.py"),
+            "--dataset_config",
+            str(config_path.resolve()),
+            "--vae",
+            str(vae),
+            "--model_version",
+            "original",
+        ]
+        text_args = [
+            str(python),
+            str(
+                musubi
+                / "src"
+                / "musubi_tuner"
+                / "qwen_image_cache_text_encoder_outputs.py"
+            ),
+            "--dataset_config",
+            str(config_path.resolve()),
+            "--text_encoder",
+            str(text_encoder),
+            "--batch_size",
+            "1",
+            "--model_version",
+            "original",
+            "--fp8_vl",
+        ]
         train_args = [
-            '"%PYTHON%"',
+            str(python),
             "-m",
             "accelerate.commands.launch",
             "--num_cpu_threads_per_process",
             "1",
             "--mixed_precision",
             "bf16",
-            '"%MUSUBI%\\src\\musubi_tuner\\qwen_image_train_network.py"',
+            str(musubi / "src" / "musubi_tuner" / "qwen_image_train_network.py"),
             "--dit",
-            '"%DIT%"',
+            str(dit),
             "--vae",
-            '"%VAE%"',
+            str(vae),
             "--text_encoder",
-            '"%TEXT_ENCODER%"',
+            str(text_encoder),
             "--dataset_config",
-            '"%CONFIG%"',
+            str(config_path.resolve()),
             "--model_version",
             "original",
             "--sdpa",
@@ -345,7 +351,7 @@ class TrainingPreparer:
             "--seed",
             "42",
             "--output_dir",
-            '"%OUTPUT_DIR%"',
+            str(output_dir),
             "--output_name",
             options.output_name,
             "--fp8_base",
@@ -354,49 +360,125 @@ class TrainingPreparer:
         ]
         if options.blocks_to_swap > 0:
             train_args += ["--blocks_to_swap", str(options.blocks_to_swap)]
-        train_cmd = " ".join(train_args)
 
+        def quote_cmd(args: list[str]) -> str:
+            return " ".join(
+                '"' + value.replace('"', '\\"') + '"'
+                if (" " in value or "\t" in value or any(ord(ch) > 127 for ch in value))
+                else value
+                for value in args
+            )
+
+        latent_cmd = quote_cmd(latent_args)
+        text_cmd = quote_cmd(text_args)
+        train_cmd = quote_cmd(train_args)
+
+        # Keep individual BAT files for manual debugging, but the app does not
+        # execute them. Windows cmd.exe can misread UTF-8 batch files when the
+        # workspace path contains Korean/non-ASCII characters.
+        common_header = (
+            "@echo off\n"
+            "setlocal\n"
+            "chcp 65001 >nul\n"
+            "set PYTHONUTF8=1\n"
+            "set PYTHONUNBUFFERED=1\n"
+        )
         cache_latents.write_text(
             common_header
             + latent_cmd
             + "\nif errorlevel 1 exit /b %errorlevel%\n",
-            encoding="utf-8",
+            encoding="utf-8-sig",
         )
         cache_text.write_text(
             common_header
             + text_cmd
             + "\nif errorlevel 1 exit /b %errorlevel%\n",
-            encoding="utf-8",
+            encoding="utf-8-sig",
         )
         train.write_text(
             common_header
             + train_cmd
             + "\nif errorlevel 1 exit /b %errorlevel%\n",
-            encoding="utf-8",
+            encoding="utf-8-sig",
         )
-        run_all.write_text(
-            "@echo off\n"
-            "setlocal\n"
-            "echo __LDM_STAGE__ 1 Latent cache\n"
-            f'call "{cache_latents}"\n'
-            "if errorlevel 1 goto :fail\n"
-            "echo __LDM_STAGE__ 2 Text encoder cache\n"
-            f'call "{cache_text}"\n'
-            "if errorlevel 1 goto :fail\n"
-            "echo __LDM_STAGE__ 3 LoRA training\n"
-            f'call "{train}"\n'
-            "if errorlevel 1 goto :fail\n"
-            "echo __LDM_DONE__\n"
-            "echo Training completed.\n"
-            "exit /b 0\n"
-            ":fail\n"
-            "echo Training failed. Check the log above.\n"
-            "exit /b 1\n",
+        run_all_bat.write_text(
+            common_header
+            + "echo This BAT is for manual debugging only.\n"
+            + f'call "{cache_latents}"\n'
+            + "if errorlevel 1 exit /b %errorlevel%\n"
+            + f'call "{cache_text}"\n'
+            + "if errorlevel 1 exit /b %errorlevel%\n"
+            + f'call "{train}"\n'
+            + "exit /b %errorlevel%\n",
+            encoding="utf-8-sig",
+        )
+
+        stages = [
+            {
+                "number": 1,
+                "title": "Latent cache",
+                "command": latent_args,
+            },
+            {
+                "number": 2,
+                "title": "Text encoder cache",
+                "command": text_args,
+            },
+            {
+                "number": 3,
+                "title": "LoRA training",
+                "command": train_args,
+            },
+        ]
+        runner_source = (
+            "from __future__ import annotations\n"
+            "import os\n"
+            "import subprocess\n"
+            "import sys\n\n"
+            f"WORKDIR = {json.dumps(str(musubi), ensure_ascii=False)}\n"
+            f"STAGES = {json.dumps(stages, ensure_ascii=False, indent=2)}\n\n"
+            "env = os.environ.copy()\n"
+            "env['PYTHONUTF8'] = '1'\n"
+            "env['PYTHONUNBUFFERED'] = '1'\n"
+            "env['PYTHONIOENCODING'] = 'utf-8'\n\n"
+            "for stage in STAGES:\n"
+            "    print(\n"
+            "        f\"__LDM_STAGE__ {stage['number']} {stage['title']}\",\n"
+            "        flush=True,\n"
+            "    )\n"
+            "    process = subprocess.Popen(\n"
+            "        stage['command'],\n"
+            "        cwd=WORKDIR,\n"
+            "        env=env,\n"
+            "        stdout=subprocess.PIPE,\n"
+            "        stderr=subprocess.STDOUT,\n"
+            "        bufsize=0,\n"
+            "    )\n"
+            "    assert process.stdout is not None\n"
+            "    while True:\n"
+            "        reader = getattr(process.stdout, 'read1', process.stdout.read)\n"
+            "        chunk = reader(4096)\n"
+            "        if not chunk:\n"
+            "            break\n"
+            "        sys.stdout.write(chunk.decode('utf-8', errors='replace'))\n"
+            "        sys.stdout.flush()\n"
+            "    code = process.wait()\n"
+            "    if code != 0:\n"
+            "        print(\n"
+            "            f\"__LDM_FAILED__ stage={stage['number']} code={code}\",\n"
+            "            flush=True,\n"
+            "        )\n"
+            "        raise SystemExit(code)\n\n"
+            "print('__LDM_DONE__', flush=True)\n"
+        )
+        run_all_py.write_text(
+            runner_source,
             encoding="utf-8",
         )
 
         preview = (
-            "[Identity LoRA / Qwen-Image original / Control 없음]\n\n"
+            "[Identity LoRA / Qwen-Image original / Control 없음]\n"
+            "[Unicode-safe Python runner]\n\n"
             "[1] Latent cache\n"
             + latent_cmd
             + "\n\n[2] Text encoder cache\n"
@@ -408,6 +490,8 @@ class TrainingPreparer:
             "cache_latents": cache_latents,
             "cache_text": cache_text,
             "train": train,
-            "run_all": run_all,
+            "run_all": run_all_py,
+            "run_all_bat": run_all_bat,
             "preview": preview,
         }
+

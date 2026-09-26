@@ -224,3 +224,14 @@ LoRADatasetMaker PATCH NOTES
 - 실패 시 종료 코드와 마지막 로그를 팝업으로 표시
 - 기존 run_all.bat의 pause 제거해 앱 내부 프로세스가 완료 후 대기 상태로 멈추는 문제 방지
 - 패키지 버전 0.0.17
+
+0018 - Unicode-safe Training runner
+- 한글/비ASCII workspace 경로에서 run_all.bat이 즉시 실패하던 Windows cmd 코드페이지 문제 수정
+- 앱의 실제 Training 실행 경로를 cmd.exe/BAT에서 Musubi 전용 Python + run_all.py 방식으로 변경
+- subprocess에 argument list를 직접 전달해 한글 경로/공백/특수문자 quoting 문제 제거
+- child Python에 PYTHONUTF8 / PYTHONIOENCODING / PYTHONUNBUFFERED를 강제해 실시간 로그 UTF-8 통일
+- Latent cache / Text encoder cache / LoRA training 단계 marker는 Python runner가 직접 출력
+- 실패 단계와 종료 코드를 __LDM_FAILED__ marker로 앱에 전달
+- 기존 개별 BAT는 수동 디버깅용으로 유지하되 UTF-8 BOM + chcp 65001 적용
+- Training 탭 실행은 run_all.py만 사용하므로 한글 폴더에서도 cmd.exe 코드페이지 영향을 받지 않음
+- 패키지 버전 0.0.18

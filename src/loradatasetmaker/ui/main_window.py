@@ -889,9 +889,23 @@ class MainWindow(QMainWindow):
         self.training_stop_button.setEnabled(True)
         self.training_status_label.setText("Training 시작 중...")
 
+        python_text = self.training_python_edit.text().strip()
+        python_exe = Path(python_text) if python_text else None
+        if python_exe is None or not python_exe.is_file():
+            self.training_process = None
+            process.deleteLater()
+            self.training_prepare_button.setEnabled(True)
+            self.training_stop_button.setEnabled(False)
+            QMessageBox.critical(
+                self,
+                "Train 실행 실패",
+                "Musubi 전용 python.exe 경로를 찾지 못했어.",
+            )
+            return
+
         process.start(
-            "cmd.exe",
-            ["/d", "/c", str(script)],
+            str(python_exe),
+            ["-X", "utf8", "-u", str(script)],
         )
 
     def _on_training_started(self) -> None:
@@ -939,6 +953,20 @@ class MainWindow(QMainWindow):
                 max(self.training_progress.value(), stage_start)
             )
             self.training_detail_label.setText("-")
+
+        failed_match = re.search(
+            r"__LDM_FAILED__\s+stage=(\d+)\s+code=(-?\d+)",
+            text,
+        )
+        if failed_match:
+            stage_no = int(failed_match.group(1))
+            code = int(failed_match.group(2))
+            self.training_stage_label.setText(
+                f"{stage_no}/3 단계 실패"
+            )
+            self.training_detail_label.setText(
+                f"종료 코드 {code}"
+            )
 
         if "__LDM_DONE__" in text:
             self.training_progress.setValue(100)
