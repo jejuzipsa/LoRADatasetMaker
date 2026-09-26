@@ -21,6 +21,7 @@ Windows용 로컬 LoRA 학습 데이터셋 전처리/검수 도구.
 - 0016: Musubi Tuner + 전용 Python 자동 설치
 - 0017: Training 실시간 로그 / 진행률 / 중지 기능
 - 0018: 한글 경로 대응 Unicode-safe Training runner
+- 0019: 손상된 uv/Musubi Python 환경 자동 감지·복구
 
 ## 1차 목표
 사진을 대량 투입하면 동일 인물 후보를 분류하고, Head/Portrait 학습용 크롭·품질 검사·Vision 검수·중복 판정·얼굴 방향 분석·캡션 생성을 수행한 뒤, 사용자가 모든 채택/제외/보류 결과를 최종 검수하여 LoRA 학습용 데이터셋으로 Export한다.
@@ -51,7 +52,7 @@ Windows용 로컬 LoRA 학습 데이터셋 전처리/검수 도구.
 - Trigger 자동 삽입 학습 workspace 생성
 - Qwen-Image base용 dataset.toml / cache / train BAT 생성
 - ComfyUI models 폴더에서 Qwen-Image DiT / VAE / Text Encoder 자동 검색
-- Musubi Tuner v0.3.5 + uv managed Python 3.11 + cu128 전용 환경 자동 설치
+- Musubi Tuner v0.3.5 + uv managed Python 3.11 + cu128 전용 환경 자동 설치/복구
 - Latent cache / Text Encoder cache / LoRA Train 3단계 실시간 상태와 Progress Bar
 - Training stdout/stderr 실시간 로그, Step/Loss 표시, 중지 버튼
 - cmd.exe를 우회하는 Python runner로 한글/비ASCII workspace 경로 지원
@@ -118,3 +119,8 @@ Identity LoRA 모드에서는 Qwen-Image-Edit-2511 DiT를 자동 선택하지 �
 Training 탭의 `자동 설치` 버튼은 프로그램의 `tools` 폴더 아래에 Musubi Tuner stable release v0.3.5와 독립 Python 환경을 준비한다. Git 설치는 필요하지 않으며, uv를 사용해 Python 3.11과 `.venv`를 관리한다.
 
 ComfyUI의 Python 환경은 수정하거나 재사용하지 않는다. Musubi의 `cu128` extra를 사용해 CUDA 12.8용 PyTorch/torchvision 및 필요한 의존성을 설치하며, 설치 완료 후 Musubi 경로와 전용 `python.exe`가 Training 탭에 자동 입력된다.
+
+
+### Musubi Python 자동 복구
+
+Windows에서 uv가 만든 `.venv\\Scripts\\python.exe`는 파일이 남아 있어도 연결된 managed Python이 사라지면 `uv trampoline failed to spawn Python child process` 오류를 낼 수 있다. 앱은 0.0.19부터 `python.exe -V`를 실제 실행해 환경을 검증하고, 손상된 경우 `.venv`를 지운 뒤 Python 3.11과 Musubi 의존성을 자동 재생성한다.

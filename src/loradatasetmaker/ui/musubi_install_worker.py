@@ -28,6 +28,35 @@ def default_tools_root() -> Path:
     return Path.cwd() / "tools"
 
 
+def validate_python_executable(python_exe: Path) -> tuple[bool, str]:
+    """Check that a venv python.exe is more than an existing uv trampoline."""
+    if not python_exe.is_file():
+        return False, "python.exe 파일 없음"
+
+    creationflags = 0
+    if os.name == "nt":
+        creationflags = subprocess.CREATE_NO_WINDOW
+
+    try:
+        result = subprocess.run(
+            [str(python_exe), "-V"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=20,
+            creationflags=creationflags,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return False, str(exc)
+
+    output = (result.stdout or "").strip()
+    if result.returncode != 0:
+        return False, output or f"exit code {result.returncode}"
+    return True, output or "Python OK"
+
+
 class MusubiInstallWorker(QObject):
     status = Signal(str)
     finished = Signal(str, str, str)
@@ -79,8 +108,24 @@ class MusubiInstallWorker(QObject):
                 env=env,
             )
 
+            python_exe = musubi_dir / ".venv" / "Scripts" / "python.exe"
+            if python_exe.exists():
+                valid, detail = validate_python_executable(python_exe)
+                if not valid:
+                    self.status.emit(
+                        "기존 Musubi Python 환경 손상 감지 - .venv 자동 복구 중..."
+                    )
+                    try:
+                        shutil.rmtree(musubi_dir / ".venv")
+                    except OSError as exc:
+                        raise RuntimeError(
+                            "손상된 Musubi .venv를 삭제하지 못했어. "
+                            "실행 중인 Python/Training 프로세스를 종료한 뒤 다시 시도해줘. "
+                            f"상세: {exc}"
+                        ) from exc
+
             self.status.emit(
-                "Musubi 의존성 설치 중... (PyTorch CUDA 12.8 포함, 시간이 걸릴 수 있어)"
+                "Musubi 의존성 설치/복구 중... (PyTorch CUDA 12.8 포함, 시간이 걸릴 수 있어)"
             )
             self._run_command(
                 [
@@ -96,9 +141,11 @@ class MusubiInstallWorker(QObject):
             )
 
             python_exe = musubi_dir / ".venv" / "Scripts" / "python.exe"
-            if not python_exe.is_file():
+            valid, detail = validate_python_executable(python_exe)
+            if not valid:
                 raise RuntimeError(
-                    "Musubi .venv의 python.exe가 생성되지 않았어."
+                    "Musubi .venv Python이 생성됐지만 실행할 수 없어. "
+                    f"상세: {detail}"
                 )
 
             self.status.emit("설치 검증 중...")
@@ -180,7 +227,7 @@ class MusubiInstallWorker(QObject):
     def _download(self, url: str, target: Path) -> None:
         request = urllib.request.Request(
             url,
-            headers={"User-Agent": "LoRADatasetMaker/0.0.16"},
+            headers={"User-Agent": "LoRADatasetMaker/0.0.19"},
         )
         with urllib.request.urlopen(request, timeout=120) as response:
             total = int(response.headers.get("Content-Length") or 0)

@@ -50,6 +50,7 @@ from loradatasetmaker.ui.musubi_install_worker import (
     MUSUBI_VERSION,
     MusubiInstallWorker,
     default_tools_root,
+    validate_python_executable,
 )
 from loradatasetmaker.ui.vision_worker import VisionWorker
 
@@ -339,7 +340,7 @@ class MainWindow(QMainWindow):
             )
         )
         musubi_row.addWidget(musubi_browse)
-        self.training_musubi_install_button = QPushButton("자동 설치")
+        self.training_musubi_install_button = QPushButton("자동 설치/복구")
         self.training_musubi_install_button.clicked.connect(
             self._install_musubi
         )
@@ -534,12 +535,21 @@ class MainWindow(QMainWindow):
         tools_root = default_tools_root()
         musubi_dir = tools_root / "musubi-tuner"
         python_exe = musubi_dir / ".venv" / "Scripts" / "python.exe"
-        if musubi_dir.is_dir() and python_exe.is_file():
+        if musubi_dir.is_dir():
             self.training_musubi_edit.setText(str(musubi_dir))
-            self.training_python_edit.setText(str(python_exe))
-            self.training_musubi_status_label.setText(
-                f"설치됨: {MUSUBI_VERSION} / 전용 Python 환경 확인됨"
-            )
+        if musubi_dir.is_dir() and python_exe.is_file():
+            valid, detail = validate_python_executable(python_exe)
+            if valid:
+                self.training_python_edit.setText(str(python_exe))
+                self.training_musubi_status_label.setText(
+                    f"설치됨: {MUSUBI_VERSION} / {detail}"
+                )
+            else:
+                self.training_python_edit.clear()
+                self.training_musubi_status_label.setText(
+                    "Musubi Python 환경 손상 감지 - 자동 설치/복구를 눌러줘. "
+                    f"({detail})"
+                )
 
     def _install_musubi(self) -> None:
         if self.musubi_thread is not None:
@@ -592,9 +602,14 @@ class MainWindow(QMainWindow):
         self.training_musubi_edit.setText(musubi_path)
         self.training_python_edit.setText(python_path)
         self.training_musubi_status_label.setText(
-            f"설치 완료: Musubi Tuner {version} / 전용 Python 3.11"
+            f"설치/복구 완료: Musubi Tuner {version} / 전용 Python 3.11"
         )
         self.training_prepare_button.setEnabled(True)
+        if (
+            self.training_run_script is not None
+            and self.training_run_script.is_file()
+        ):
+            self.training_run_button.setEnabled(True)
         QMessageBox.information(
             self,
             "Musubi 설치 완료",
@@ -896,11 +911,26 @@ class MainWindow(QMainWindow):
             process.deleteLater()
             self.training_prepare_button.setEnabled(True)
             self.training_stop_button.setEnabled(False)
-            QMessageBox.critical(
-                self,
-                "Train 실행 실패",
-                "Musubi 전용 python.exe 경로를 찾지 못했어.",
+            self.training_status_label.setText(
+                "Musubi Python 없음 - 자동 복구 필요"
             )
+            self._install_musubi()
+            return
+
+        valid, detail = validate_python_executable(python_exe)
+        if not valid:
+            self.training_process = None
+            process.deleteLater()
+            self.training_prepare_button.setEnabled(True)
+            self.training_stop_button.setEnabled(False)
+            self.training_python_edit.clear()
+            self.training_status_label.setText(
+                "Musubi Python 손상 감지 - 자동 복구 시작"
+            )
+            self.training_musubi_status_label.setText(
+                f"기존 .venv 손상: {detail}"
+            )
+            self._install_musubi()
             return
 
         process.start(

@@ -235,3 +235,16 @@ LoRADatasetMaker PATCH NOTES
 - 기존 개별 BAT는 수동 디버깅용으로 유지하되 UTF-8 BOM + chcp 65001 적용
 - Training 탭 실행은 run_all.py만 사용하므로 한글 폴더에서도 cmd.exe 코드페이지 영향을 받지 않음
 - 패키지 버전 0.0.18
+
+0019 - Self-heal broken uv Python environment
+- uv trampoline python.exe 파일이 존재해도 실제 base Python이 없으면 실행 실패하는 상태를 검출
+- Musubi 기존 .venv의 python.exe -V 실제 실행 검증 추가
+- 'uv trampoline failed to spawn Python child process / entity not found' 유형을 손상 환경으로 판정
+- 자동 설치/복구 시 손상된 .venv를 삭제하고 Python 3.11 + cu128 환경을 자동 재생성
+- uv python install 3.11을 먼저 실행해 누락된 managed base Python도 복구
+- 앱 시작 시 기존 Musubi Python을 실제 실행 검증하고 손상 시 Python 경로 자동 사용 금지
+- Train 실행 직전에도 interpreter health check 수행
+- Train 시 손상된 interpreter가 발견되면 즉시 실행하지 않고 Musubi 자동 복구 시작
+- Musubi 버튼명을 '자동 설치/복구'로 변경
+- 복구 완료 후 기존 Training script가 있으면 Train 버튼 다시 활성화
+- 패키지 버전 0.0.19
