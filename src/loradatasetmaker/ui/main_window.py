@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 import cv2
 import numpy as np
@@ -65,6 +66,9 @@ class MainWindow(QMainWindow):
         self.exporter = DatasetExporter()
         self.training_preparer = TrainingPreparer()
         self.training_run_script: Path | None = None
+        self.training_process: QProcess | None = None
+        self.training_stage = 0
+        self.training_log_tail: list[str] = []
 
         self.analysis_thread: QThread | None = None
         self.analysis_worker: AnalysisWorker | None = None
@@ -453,14 +457,36 @@ class MainWindow(QMainWindow):
         self.training_run_button.clicked.connect(self._run_training)
         action_row.addWidget(self.training_run_button)
 
+        self.training_stop_button = QPushButton("중지")
+        self.training_stop_button.setEnabled(False)
+        self.training_stop_button.clicked.connect(self._stop_training)
+        action_row.addWidget(self.training_stop_button)
+
         self.training_status_label = QLabel("대기")
         action_row.addWidget(self.training_status_label, 1)
         layout.addLayout(action_row)
 
+        progress_row = QHBoxLayout()
+        self.training_stage_label = QLabel("대기")
+        self.training_stage_label.setMinimumWidth(150)
+        progress_row.addWidget(self.training_stage_label)
+
+        self.training_progress = QProgressBar()
+        self.training_progress.setRange(0, 100)
+        self.training_progress.setValue(0)
+        self.training_progress.setTextVisible(True)
+        progress_row.addWidget(self.training_progress, 1)
+
+        self.training_detail_label = QLabel("-")
+        self.training_detail_label.setMinimumWidth(240)
+        progress_row.addWidget(self.training_detail_label)
+        layout.addLayout(progress_row)
+
         self.training_command_preview = QPlainTextEdit()
         self.training_command_preview.setReadOnly(True)
+        self.training_command_preview.document().setMaximumBlockCount(2500)
         self.training_command_preview.setPlaceholderText(
-            "학습 준비 후 dataset.toml / cache / train 명령을 여기서 확인할 수 있어."
+            "학습 준비 전에는 명령 미리보기, Train 실행 후에는 실시간 로그가 표시돼."
         )
         layout.addWidget(self.training_command_preview, 1)
 
@@ -820,8 +846,11 @@ class MainWindow(QMainWindow):
             )
 
     def _run_training(self) -> None:
+        if self.training_process is not None:
+            return
         if self.training_run_script is None:
             return
+
         script = self.training_run_script
         if not script.is_file():
             QMessageBox.warning(
@@ -831,19 +860,214 @@ class MainWindow(QMainWindow):
             )
             return
 
-        ok = QProcess.startDetached(
-            "cmd.exe",
-            ["/c", str(script)],
-            str(script.parent),
+        self.training_stage = 0
+        self.training_log_tail = []
+        self.training_progress.setRange(0, 100)
+        self.training_progress.setValue(0)
+        self.training_stage_label.setText("시작 준비")
+        self.training_detail_label.setText("-")
+        self.training_command_preview.clear()
+        self.training_command_preview.appendPlainText(
+            f"Training 시작: {script}\n"
         )
-        if not ok:
+
+        process = QProcess(self)
+        process.setProcessChannelMode(
+            QProcess.ProcessChannelMode.MergedChannels
+        )
+        process.setWorkingDirectory(str(script.parent))
+        process.readyReadStandardOutput.connect(
+            self._on_training_output
+        )
+        process.started.connect(self._on_training_started)
+        process.finished.connect(self._on_training_finished)
+        process.errorOccurred.connect(self._on_training_process_error)
+        self.training_process = process
+
+        self.training_prepare_button.setEnabled(False)
+        self.training_run_button.setEnabled(False)
+        self.training_stop_button.setEnabled(True)
+        self.training_status_label.setText("Training 시작 중...")
+
+        process.start(
+            "cmd.exe",
+            ["/d", "/c", str(script)],
+        )
+
+    def _on_training_started(self) -> None:
+        self.training_status_label.setText("Training 실행 중")
+        self.training_stage_label.setText("1/3 Latent cache")
+        self.training_progress.setValue(1)
+
+    def _on_training_output(self) -> None:
+        process = self.training_process
+        if process is None:
+            return
+
+        raw = bytes(process.readAllStandardOutput())
+        if not raw:
+            return
+
+        text = raw.decode("utf-8", errors="replace")
+        normalized = text.replace("\r", "\n")
+        clean_lines = [
+            line.rstrip()
+            for line in normalized.splitlines()
+            if line.strip()
+        ]
+        if clean_lines:
+            self.training_command_preview.appendPlainText(
+                "\n".join(clean_lines)
+            )
+            self.training_log_tail.extend(clean_lines)
+            self.training_log_tail = self.training_log_tail[-30:]
+
+        self._parse_training_output(normalized)
+
+    def _parse_training_output(self, text: str) -> None:
+        stage_match = re.findall(
+            r"__LDM_STAGE__\s+([123])\s+([^\r\n]+)",
+            text,
+        )
+        for stage_text, title in stage_match:
+            self.training_stage = int(stage_text)
+            self.training_stage_label.setText(
+                f"{self.training_stage}/3 {title.strip()}"
+            )
+            stage_start = {1: 0, 2: 20, 3: 35}[self.training_stage]
+            self.training_progress.setValue(
+                max(self.training_progress.value(), stage_start)
+            )
+            self.training_detail_label.setText("-")
+
+        if "__LDM_DONE__" in text:
+            self.training_progress.setValue(100)
+            self.training_stage_label.setText("완료")
+
+        percent_matches = re.findall(r"(\d{1,3})%\|", text)
+        if percent_matches and self.training_stage in (1, 2, 3):
+            raw_percent = max(
+                0,
+                min(100, int(percent_matches[-1])),
+            )
+            start, end = {
+                1: (0, 20),
+                2: (20, 35),
+                3: (35, 100),
+            }[self.training_stage]
+            overall = start + int(
+                (end - start) * raw_percent / 100
+            )
+            self.training_progress.setValue(
+                max(self.training_progress.value(), overall)
+            )
+
+        if self.training_stage == 3:
+            step_matches = re.findall(
+                r"(\d+)\s*/\s*(\d+)",
+                text,
+            )
+            loss_matches = re.findall(
+                r"avr_loss=([0-9.eE+\-]+)",
+                text,
+            )
+            details: list[str] = []
+            if step_matches:
+                current, total = step_matches[-1]
+                details.append(f"Step {current}/{total}")
+            if loss_matches:
+                details.append(f"Loss {loss_matches[-1]}")
+            if details:
+                self.training_detail_label.setText(" | ".join(details))
+
+    def _on_training_finished(
+        self,
+        exit_code: int,
+        _exit_status: QProcess.ExitStatus,
+    ) -> None:
+        # Drain any final buffered output before releasing the process.
+        self._on_training_output()
+
+        success = exit_code == 0
+        if success:
+            self.training_progress.setValue(100)
+            self.training_stage_label.setText("완료")
+            output_dir = Path(
+                self.training_output_dir_edit.text().strip()
+            )
+            results = (
+                sorted(
+                    output_dir.glob("*.safetensors"),
+                    key=lambda path: path.stat().st_mtime,
+                    reverse=True,
+                )
+                if output_dir.is_dir()
+                else []
+            )
+            if results:
+                self.training_status_label.setText(
+                    f"학습 완료: {results[0].name}"
+                )
+                self.training_detail_label.setText(
+                    str(results[0])
+                )
+            else:
+                self.training_status_label.setText("학습 완료")
+                self.training_detail_label.setText(
+                    "출력 폴더 확인"
+                )
+        else:
+            self.training_status_label.setText(
+                f"Training 실패 / 종료 코드 {exit_code}"
+            )
+            self.training_stage_label.setText("실패")
+            detail = "\n".join(self.training_log_tail[-12:])
             QMessageBox.critical(
                 self,
-                "Train 실행 실패",
-                "Training 콘솔을 시작하지 못했어.",
+                "Training 실패",
+                (
+                    f"학습 프로세스가 종료 코드 {exit_code}로 끝났어.\n\n"
+                    f"{detail}"
+                ),
             )
+
+        process = self.training_process
+        self.training_process = None
+        if process is not None:
+            process.deleteLater()
+
+        self.training_prepare_button.setEnabled(True)
+        self.training_run_button.setEnabled(
+            self.training_run_script is not None
+            and self.training_run_script.is_file()
+        )
+        self.training_stop_button.setEnabled(False)
+
+    def _on_training_process_error(
+        self,
+        error: QProcess.ProcessError,
+    ) -> None:
+        if error == QProcess.ProcessError.Crashed:
             return
-        self.training_status_label.setText("Training 콘솔 실행됨")
+        self.training_status_label.setText(
+            f"Training 실행 오류: {error.name}"
+        )
+
+    def _stop_training(self) -> None:
+        process = self.training_process
+        if process is None:
+            return
+
+        self.training_status_label.setText("Training 중지 중...")
+        self.training_stop_button.setEnabled(False)
+        pid = int(process.processId())
+        if pid > 0:
+            QProcess.startDetached(
+                "taskkill.exe",
+                ["/PID", str(pid), "/T", "/F"],
+            )
+        else:
+            process.kill()
 
     def _make_preview_label(self, text: str) -> QLabel:
         label = QLabel(text)

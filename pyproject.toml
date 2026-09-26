@@ -1,6 +1,6 @@
 [project]
 name = "loradatasetmaker"
-version = "0.0.16"
+version = "0.0.17"
 description = "Local LoRA identity dataset preprocessing and review tool for Windows"
 requires-python = ">=3.11"
 dependencies = [

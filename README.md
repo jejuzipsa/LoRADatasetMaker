@@ -19,6 +19,7 @@ Windows용 로컬 LoRA 학습 데이터셋 전처리/검수 도구.
 - 0014: Identity LoRA 기본 모드로 전환 / Control 요구 제거
 - 0015: ComfyUI Qwen 모델 자동 검색
 - 0016: Musubi Tuner + 전용 Python 자동 설치
+- 0017: Training 실시간 로그 / 진행률 / 중지 기능
 
 ## 1차 목표
 사진을 대량 투입하면 동일 인물 후보를 분류하고, Head/Portrait 학습용 크롭·품질 검사·Vision 검수·중복 판정·얼굴 방향 분석·캡션 생성을 수행한 뒤, 사용자가 모든 채택/제외/보류 결과를 최종 검수하여 LoRA 학습용 데이터셋으로 Export한다.
@@ -50,6 +51,8 @@ Windows용 로컬 LoRA 학습 데이터셋 전처리/검수 도구.
 - Qwen-Image base용 dataset.toml / cache / train BAT 생성
 - ComfyUI models 폴더에서 Qwen-Image DiT / VAE / Text Encoder 자동 검색
 - Musubi Tuner v0.3.5 + uv managed Python 3.11 + cu128 전용 환경 자동 설치
+- Latent cache / Text Encoder cache / LoRA Train 3단계 실시간 상태와 Progress Bar
+- Training stdout/stderr 실시간 로그, Step/Loss 표시, 중지 버튼
 - GitHub Actions 자동 검사
 - Windows EXE 자동 빌드 artifact
 
@@ -71,7 +74,6 @@ Vision 검수는 모든 이미지를 무조건 다시 처리하지 않는다. RE
 - Vision provider 추가(OpenAI-compatible 등)
 - WAN Trainer 연동
 - Qwen Edit 2511 직접 Edit-LoRA 모드(control/source pair) 별도 추가
-- Training 로그/진행률을 앱 내부에 직접 스트리밍
 
 ## 로컬 실행
 

@@ -377,20 +377,20 @@ class TrainingPreparer:
         run_all.write_text(
             "@echo off\n"
             "setlocal\n"
+            "echo __LDM_STAGE__ 1 Latent cache\n"
             f'call "{cache_latents}"\n'
             "if errorlevel 1 goto :fail\n"
+            "echo __LDM_STAGE__ 2 Text encoder cache\n"
             f'call "{cache_text}"\n'
             "if errorlevel 1 goto :fail\n"
+            "echo __LDM_STAGE__ 3 LoRA training\n"
             f'call "{train}"\n'
             "if errorlevel 1 goto :fail\n"
-            "echo.\n"
+            "echo __LDM_DONE__\n"
             "echo Training completed.\n"
-            "pause\n"
             "exit /b 0\n"
             ":fail\n"
-            "echo.\n"
-            "echo Training failed. Check the message above.\n"
-            "pause\n"
+            "echo Training failed. Check the log above.\n"
             "exit /b 1\n",
             encoding="utf-8",
         )
