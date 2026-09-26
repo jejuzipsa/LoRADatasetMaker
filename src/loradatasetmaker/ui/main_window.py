@@ -404,9 +404,26 @@ class MainWindow(QMainWindow):
         )
         layout.addWidget(engine_group)
 
-        settings_group = QGroupBox("1차 학습 설정")
-        settings = QHBoxLayout(settings_group)
+        settings_group = QGroupBox("Identity 학습 설정")
+        settings_layout = QVBoxLayout(settings_group)
 
+        preset_row = QHBoxLayout()
+        preset_row.addWidget(QLabel("Preset"))
+        for title, rank, epochs in (
+            ("빠른 테스트", 16, 8),
+            ("Identity 표준", 32, 24),
+            ("Identity 강하게", 64, 36),
+        ):
+            button = QPushButton(title)
+            button.clicked.connect(
+                lambda _checked=False, r=rank, e=epochs:
+                self._apply_training_preset(r, e)
+            )
+            preset_row.addWidget(button)
+        preset_row.addStretch(1)
+        settings_layout.addLayout(preset_row)
+
+        settings = QHBoxLayout()
         settings.addWidget(QLabel("Resolution"))
         self.training_resolution_spin = QSpinBox()
         self.training_resolution_spin.setRange(512, 1536)
@@ -417,13 +434,13 @@ class MainWindow(QMainWindow):
         settings.addWidget(QLabel("Rank"))
         self.training_rank_spin = QSpinBox()
         self.training_rank_spin.setRange(4, 256)
-        self.training_rank_spin.setValue(16)
+        self.training_rank_spin.setValue(32)
         settings.addWidget(self.training_rank_spin)
 
         settings.addWidget(QLabel("Epoch"))
         self.training_epoch_spin = QSpinBox()
         self.training_epoch_spin.setRange(1, 100)
-        self.training_epoch_spin.setValue(8)
+        self.training_epoch_spin.setValue(24)
         settings.addWidget(self.training_epoch_spin)
 
         settings.addWidget(QLabel("LR"))
@@ -437,13 +454,28 @@ class MainWindow(QMainWindow):
         self.training_blocks_spin.setValue(45)
         settings.addWidget(self.training_blocks_spin)
         settings.addStretch(1)
+        settings_layout.addLayout(settings)
+
+        self.training_step_estimate_label = QLabel(
+            "예상 Step: Accepted 폴더를 지정하면 계산해."
+        )
+        self.training_step_estimate_label.setWordWrap(True)
+        settings_layout.addWidget(self.training_step_estimate_label)
+        self.training_dataset_edit.textChanged.connect(
+            self._update_training_step_estimate
+        )
+        self.training_epoch_spin.valueChanged.connect(
+            self._update_training_step_estimate
+        )
+        self._update_training_step_estimate()
         layout.addWidget(settings_group)
 
         memory_note = QLabel(
-            "12GB VRAM에서는 block swap/fp8 절약 옵션이 필요할 수 있고 "
-            "시스템 RAM 사용량이 크게 늘 수 있어. 이 모드는 Control 없는 "
-            "Qwen-Image Identity LoRA 학습이야. Edit-2511에서의 사용성은 "
-            "첫 LoRA 결과를 실제 ComfyUI에서 확인하면서 판단하면 돼."
+            "기본값은 Identity 표준(Rank 32 / Epoch 24 / LR 5e-5)이야. "
+            "빠른 테스트는 학습량이 약할 수 있고, Identity 강하게 프리셋은 "
+            "데이터 수에 따라 시간이 크게 늘어날 수 있어. 12GB VRAM에서는 "
+            "block swap/fp8 절약 옵션 때문에 시스템 RAM 사용량도 커질 수 있어. "
+            "이 모드는 Control 없는 Qwen-Image Identity LoRA 학습이야."
         )
         memory_note.setWordWrap(True)
         layout.addWidget(memory_note)
@@ -493,6 +525,50 @@ class MainWindow(QMainWindow):
 
         self._detect_local_musubi_install()
         return page
+
+    def _apply_training_preset(self, rank: int, epochs: int) -> None:
+        self.training_rank_spin.setValue(rank)
+        self.training_epoch_spin.setValue(epochs)
+        self.training_lr_edit.setText("5e-5")
+        self.training_blocks_spin.setValue(45)
+        self._update_training_step_estimate()
+
+    def _update_training_step_estimate(self, *_args: object) -> None:
+        dataset_text = self.training_dataset_edit.text().strip()
+        image_count = 0
+        if dataset_text:
+            dataset_dir = Path(dataset_text)
+            if dataset_dir.is_dir():
+                try:
+                    image_count = sum(
+                        1
+                        for path in dataset_dir.iterdir()
+                        if path.is_file()
+                        and path.suffix.lower() in SUPPORTED_EXTENSIONS
+                    )
+                except OSError:
+                    image_count = 0
+
+        if image_count <= 0:
+            self.training_step_estimate_label.setText(
+                "예상 Step: Accepted 폴더를 지정하면 계산해. "
+                "Batch 1 / repeats 1 기준이야."
+            )
+            return
+
+        epochs = self.training_epoch_spin.value()
+        estimated_steps = image_count * epochs
+        if estimated_steps < 800:
+            guide = "약한 테스트 구간 - Identity가 충분히 안 묶일 수 있어."
+        elif estimated_steps < 1500:
+            guide = "표준 시작 구간"
+        else:
+            guide = "강한 학습 구간 - 시간과 과학습 여부를 같이 확인해."
+
+        self.training_step_estimate_label.setText(
+            f"예상 Step: {estimated_steps} "
+            f"({image_count}장 × {epochs} Epoch) / {guide}"
+        )
 
     def _training_path_row(
         self,

@@ -22,8 +22,8 @@ class TrainingPrepOptions:
     trigger_token: str
     output_name: str
     resolution: int = 1024
-    rank: int = 16
-    epochs: int = 8
+    rank: int = 32
+    epochs: int = 24
     learning_rate: str = "5e-5"
     blocks_to_swap: int = 45
 
@@ -124,6 +124,13 @@ class TrainingPreparer:
 
         missing_training_paths = self._missing_training_paths(options)
         warnings: list[str] = []
+        estimated_steps = len(images) * options.epochs
+        if estimated_steps < 800:
+            warnings.append(
+                f"예상 Training Step이 {estimated_steps}으로 낮아. "
+                "특정 인물 Identity LoRA에서는 얼굴 정체성 학습이 약할 수 있어. "
+                "빠른 테스트가 아니라면 Identity 표준 프리셋을 권장해."
+            )
         if missing_training_paths:
             warnings.append(
                 "실행 파일/모델 경로 미지정: "
@@ -153,7 +160,11 @@ class TrainingPreparer:
         if ready:
             scripts = self._write_scripts(options, config_path, scripts_dir)
             run_script = scripts["run_all"]
-            preview = scripts["preview"]
+            preview = (
+                f"Dataset: {len(images)}장 / Epoch: {options.epochs} / "
+                f"예상 Step: {estimated_steps}\n"
+                + scripts["preview"]
+            )
 
         manifest = {
             "training_mode": "identity_no_control",
@@ -163,6 +174,7 @@ class TrainingPreparer:
             "resolution": options.resolution,
             "rank": options.rank,
             "epochs": options.epochs,
+            "estimated_train_steps": estimated_steps,
             "learning_rate": options.learning_rate,
             "blocks_to_swap": options.blocks_to_swap,
             "ready_to_train": ready,

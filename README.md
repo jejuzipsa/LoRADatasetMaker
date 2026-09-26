@@ -22,6 +22,7 @@ Windows용 로컬 LoRA 학습 데이터셋 전처리/검수 도구.
 - 0017: Training 실시간 로그 / 진행률 / 중지 기능
 - 0018: 한글 경로 대응 Unicode-safe Training runner
 - 0019: 손상된 uv/Musubi Python 환경 자동 감지·복구
+- 0020: Identity 학습 기본량 상향 + 프리셋 + 예상 Step 표시
 
 ## 1차 목표
 사진을 대량 투입하면 동일 인물 후보를 분류하고, Head/Portrait 학습용 크롭·품질 검사·Vision 검수·중복 판정·얼굴 방향 분석·캡션 생성을 수행한 뒤, 사용자가 모든 채택/제외/보류 결과를 최종 검수하여 LoRA 학습용 데이터셋으로 Export한다.
@@ -56,6 +57,8 @@ Windows용 로컬 LoRA 학습 데이터셋 전처리/검수 도구.
 - Latent cache / Text Encoder cache / LoRA Train 3단계 실시간 상태와 Progress Bar
 - Training stdout/stderr 실시간 로그, Step/Loss 표시, 중지 버튼
 - cmd.exe를 우회하는 Python runner로 한글/비ASCII workspace 경로 지원
+- Identity 학습 프리셋(빠른 테스트 / 표준 / 강하게) 및 예상 Step 표시
+- 기본 Identity 학습값 Rank 32 / Epoch 24 / LR 5e-5
 - GitHub Actions 자동 검사
 - Windows EXE 자동 빌드 artifact
 
@@ -103,6 +106,8 @@ Training 탭의 기본 모드는 accepted 이미지 + TXT만 사용하는 Contro
 Musubi Tuner에서 Qwen-Image-Edit-2511의 직접 학습은 control/source 이미지를 사용하는 구조이므로, 0014의 Identity 모드는 `model_version=original`인 표준 Qwen-Image base 학습으로 분리했다. 따라서 DiT에는 `qwen_image_bf16.safetensors` 같은 Qwen-Image base 가중치를 지정해야 하며, Edit-2511 DiT를 잘못 지정하면 준비 단계에서 중단한다.
 
 학습 준비 시 원본 accepted 폴더를 수정하지 않고 workspace로 복사하며 TXT 앞에 Trigger token을 자동 삽입한다. workspace에는 dataset.toml, training_manifest.json 및 scripts/01_cache_latents.bat, 02_cache_text.bat, 03_train.bat, run_all.bat을 생성한다.
+
+0.0.20부터 개인 인물 Identity 학습의 기본값은 Rank 32 / Epoch 24 / LR 5e-5다. 빠른 테스트(Rank 16 / Epoch 8), Identity 표준(Rank 32 / Epoch 24), Identity 강하게(Rank 64 / Epoch 36) 프리셋을 제공하며, Accepted 이미지 수와 Epoch를 기준으로 예상 Training Step을 UI와 training_manifest.json에 표시한다. Batch 1 / repeats 1 기준의 단순 예상치이므로 실제 trainer의 최종 step과는 약간 다를 수 있다.
 
 이 Identity LoRA를 Edit-2511에서 사용하는 부분은 직접 Edit-2511을 control 없이 학습한다는 의미가 아니며, 실제 ComfyUI 호환성/재현 결과는 생성 후 테스트 대상으로 둔다.
 

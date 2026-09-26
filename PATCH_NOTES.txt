@@ -248,3 +248,18 @@ LoRADatasetMaker PATCH NOTES
 - Musubi 버튼명을 '자동 설치/복구'로 변경
 - 복구 완료 후 기존 Training script가 있으면 Train 버튼 다시 활성화
 - 패키지 버전 0.0.19
+
+0020 - Identity training strength presets and step estimate
+- 개인 인물 Identity LoRA 기본 학습량을 기존 Rank 16 / Epoch 8에서 Rank 32 / Epoch 24로 상향
+- Learning Rate 5e-5 / Resolution 1024 / Blocks swap 45 기본값은 유지
+- Training 탭에 빠른 테스트(Rank 16 / Epoch 8) 프리셋 추가
+- Training 탭에 Identity 표준(Rank 32 / Epoch 24) 프리셋 추가 및 기본값으로 지정
+- Training 탭에 Identity 강하게(Rank 64 / Epoch 36) 프리셋 추가
+- Accepted 이미지 수와 Epoch를 기준으로 예상 Training Step을 실시간 표시
+- Batch 1 / repeats 1 기준 예상값을 training_manifest.json의 estimated_train_steps에 기록
+- 예상 Step이 800 미만이면 Identity 학습량이 약할 수 있다는 준비 단계 경고 추가
+- 학습 명령 미리보기에 Dataset 장수 / Epoch / 예상 Step을 함께 표시
+- 55장 / 8 Epoch 약 440 Step의 1차 실험에서 헤어·눈썹·입술 등 일부 특징은 학습됐지만 고유 얼굴 identity 결속이 약했던 결과를 반영해 기본 정책을 상향
+- 데이터 수가 많은 경우 강한 프리셋의 총 Step과 시간이 크게 증가할 수 있으므로 예상 Step을 확인한 뒤 실행하도록 UI 안내 추가
+- 특정 인물의 성별/연령/헤어스타일 같은 속성은 프로그램이 임의로 하드코딩하지 않고 기존 사용자 캡션을 그대로 보존
+- 패키지 버전 0.0.20
